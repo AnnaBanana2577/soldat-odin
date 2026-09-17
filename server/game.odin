@@ -79,14 +79,16 @@ enqueue :: proc(c: ^Client, m: ^net.Input) {
 		if cmd.seq <= c.ack do continue
 		at := len(c.queue)
 		for q, i in c.queue {
-			if q.seq == cmd.seq do at = -1
+			if q.seq == cmd.seq {
+				at = -1 // already here
+				break
+			}
 			if q.seq > cmd.seq {
 				at = i
 				break
 			}
 		}
-		if at == -1 do continue
-		inject_at(&c.queue, at, cmd)
+		if at >= 0 do inject_at(&c.queue, at, cmd)
 	}
 	for len(c.queue) > MAX_QUEUE do ordered_remove(&c.queue, 0)
 }

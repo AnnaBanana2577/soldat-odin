@@ -145,6 +145,7 @@ replay :: proc(g: ^Game) {
 		g.predicted[cmd.seq % PREDICTED_KEPT] = g.world.soldiers[g.me].pos
 		sim.things_update(g.ctx, &g.world, events)
 		sim.bullets_update(g.ctx, &g.world, events)
+		g.world.tick += 1 // the tick the server will run this command on
 	}
 }
 
