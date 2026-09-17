@@ -54,7 +54,8 @@ game_destroy :: proc(g: ^Game) {
 }
 
 // Every snapshot that arrived since the last tick. Its ack retires my commands; its
-// queue depth sets my clock: slower with too many waiting, faster with too few.
+// queue depth sets my clock: slower with too many waiting, faster with too few, and
+// exactly the server's when the queue is near the target, so ticks and frames keep step.
 process_server_messages :: proc(g: ^Game, conn: ^Connection) {
 	for data in conn_receive(conn) {
 		r := net.reader_make(data)
@@ -67,7 +68,8 @@ process_server_messages :: proc(g: ^Game, conn: ^Connection) {
 			if sim.vec2_length(g.smooth) > SMOOTH_SNAP do g.smooth = {}
 			g.checked = snap.ack
 		}
-		g.time_scale = 1 + clamp(f64(TARGET_QUEUE - int(snap.queue_depth)) * 0.01, -0.05, 0.05)
+		depth := int(snap.queue_depth)
+		g.time_scale = depth < TARGET_QUEUE - 1 ? 1.02 : depth > TARGET_QUEUE + 1 ? 0.98 : 1
 	}
 }
 

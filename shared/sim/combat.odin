@@ -234,20 +234,20 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	}
 	inaccuracy = min(inaccuracy * 0.25, MAX_INACCURACY)
 	max_dev := MAX_INACCURACY * math.sin(inaccuracy / MAX_INACCURACY * math.PI / 2)
-	dev := Vec2{(rand_f32(&w.rng) * 2 - 1) * max_dev, (rand_f32(&w.rng) * 2 - 1) * max_dev}
+	dev := Vec2{(rand_f32(&s.rng) * 2 - 1) * max_dev, (rand_f32(&s.rng) * 2 - 1) * max_dev}
 	vel := vec2_normalize(aim_dir + dev) * info.speed + s.vel * info.inherit
 
 	// a muzzle inside a wall (the head in a ceiling) is lowered a bit
 	if _, hit := collision_test(ctx.level, origin); hit do origin.y += 2.5
 
-	spread :: proc(w: ^World, v: Vec2, amount: f32) -> Vec2 {
-		return v + {(rand_f32(&w.rng) * 2 - 1) * amount, (rand_f32(&w.rng) * 2 - 1) * amount}
+	spread :: proc(s: ^Soldier, v: Vec2, amount: f32) -> Vec2 {
+		return v + {(rand_f32(&s.rng) * 2 - 1) * amount, (rand_f32(&s.rng) * 2 - 1) * amount}
 	}
 
 	#partial switch weapon.id {
 	case .Eagle:
-		bullet_spawn(ctx, w, origin, spread(w, vel, info.spread), weapon.id, index, info.damage, events)
-		second := spread(w, vel, info.spread)
+		bullet_spawn(ctx, w, origin, spread(s, vel, info.spread), weapon.id, index, info.damage, events)
+		second := spread(s, vel, info.spread)
 		n := vec2_normalize(vel)
 		origin2 := origin + {-math.sign(vel.x) * abs(n.y) * 3, math.sign(vel.y) * abs(n.x) * 3}
 		bullet_spawn(ctx, w, origin2, second, weapon.id, index, info.damage, events)
@@ -261,7 +261,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	case .None, .Knife:
 	case:
 		if info.style == .Shotgun {
-			for _ in 0 ..< 6 do bullet_spawn(ctx, w, origin, spread(w, vel, info.spread), weapon.id, index, info.damage, events)
+			for _ in 0 ..< 6 do bullet_spawn(ctx, w, origin, spread(s, vel, info.spread), weapon.id, index, info.damage, events)
 			s.vel -= vel * {0.0412, 0.041}
 		} else {
 			bullet_spawn(ctx, w, origin, vel, weapon.id, index, info.damage, events)

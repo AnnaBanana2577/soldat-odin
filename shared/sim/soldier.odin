@@ -20,6 +20,7 @@ Soldier :: struct {
 	health: f32,
 	dead:   bool,
 	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
+	rng:      u64, // its own randomness (the spread of its shots), so its client predicts it
 
 	// owned by the client that plays it
 	pos, old_pos:  Vec2,
@@ -69,7 +70,9 @@ Soldier :: struct {
 // A fresh soldier at a spot; the tally survives a respawn.
 soldier_spawn :: proc(ctx: ^Context, s: ^Soldier, pos: Vec2, team: Team, primary, secondary: Weapon_Id) {
 	kills, deaths, flags := s.kills, s.deaths, s.flags
+	rng := s.rng != 0 ? s.rng : (u64(transmute(u32)pos.x) << 32 | u64(transmute(u32)pos.y)) | 1 // seeded once, from where it first stood
 	s^ = {
+		rng                = rng,
 		kills              = kills,
 		deaths             = deaths,
 		flags              = flags,

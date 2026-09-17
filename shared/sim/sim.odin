@@ -93,6 +93,7 @@ step :: proc(ctx: ^Context, w: ^World, cmds: []Command, events: ^Events) {
 	for &s, i in w.soldiers {
 		if !s.active do continue
 		soldier_step(ctx, w, u8(i), cmds[i], events)
+		for k in 0 ..< MAX_THINGS do thing_claim(ctx, w, u8(i), u8(k), events)
 	}
 	things_update(ctx, w, events)
 	bullets_update(ctx, w, events)
