@@ -14,8 +14,8 @@
 //   - The server runs the one true world with step() on everyone's commands and
 //     applies the hits (damage_apply). What it sends is the world whole.
 //   - A client rebuilds its world from the newest snapshot every tick and replays its
-//     own pending commands on it (soldier_step, thing_claim, things_update,
-//     bullets_update), which predicts everything they touch. It applies no wounds.
+//     own pending commands on it (soldier_step, things_update, bullets_update),
+//     which predicts everything they touch. It applies no wounds.
 //   - Tools and tests run step() on a whole world, which does all of it at once.
 //
 // Files, one per object:
@@ -93,7 +93,6 @@ step :: proc(ctx: ^Context, w: ^World, cmds: []Command, events: ^Events) {
 	for &s, i in w.soldiers {
 		if !s.active do continue
 		soldier_step(ctx, w, u8(i), cmds[i], events)
-		for k in 0 ..< MAX_THINGS do thing_claim(ctx, w, u8(i), u8(k), events)
 	}
 	things_update(ctx, w, events)
 	bullets_update(ctx, w, events)

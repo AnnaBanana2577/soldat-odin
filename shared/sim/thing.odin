@@ -179,6 +179,7 @@ things_spawn :: proc(ctx: ^Context, w: ^World) {
 
 things_update :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 	for &t, i in w.things {
+		thing_pickup(ctx, w, &t, u8(i), events)
 		switch t.style {
 		case .None:
 			kit_respawn_tick(ctx, w, &t)
@@ -198,51 +199,29 @@ things_update :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 
 // A client's claim to have taken a thing: judged with the claimant alone in mind,
 // first claim wins. Returns true and emits the pickup when taken.
-// A pickup as a client predicts it: the thing is free, this soldier may take it and
-// is near, so it takes it. The claim goes to the server from the event.
-thing_claim :: proc(ctx: ^Context, w: ^World, soldier: u8, index: u8, events: ^Events) -> bool {
-	t := &w.things[index]
-	s := &w.soldiers[soldier]
-	if !thing_free(t, s) || !thing_may_take(w, t, s) do return false
-	thing_take(ctx, w, soldier, index, events)
-	return true
-}
-
-// A pickup as the server grants it, and as every client applies the commit: the
-// claimant judged its own reach and need, which its relayed copy here may no longer
-// show. Only the contest is judged: the thing is still there, in nobody's hands.
-thing_grant :: proc(ctx: ^Context, w: ^World, soldier: u8, index: u8, events: ^Events) -> bool {
-	t := &w.things[index]
-	if !thing_free(t, &w.soldiers[soldier]) do return false
-	thing_take(ctx, w, soldier, index, events)
-	return true
-}
-
-thing_free :: proc(t: ^Thing, s: ^Soldier) -> bool {
-	return t.style != .None && t.holder == 0 && s.active && !s.dead
-}
-
-thing_may_take :: proc(w: ^World, t: ^Thing, s: ^Soldier) -> bool {
-	#partial switch t.style {
-	case .Alpha_Flag, .Bravo_Flag:
-		return flag_can_grab(t, s)
-	case .Weapon:
-		return dropped_gun_can_pickup(t, s)
-	case .Medical_Kit, .Grenade_Kit, .Flamer_Kit, .Predator_Kit, .Vest_Kit, .Berserk_Kit, .Cluster_Kit:
-		return kit_can_pickup(w, t, s)
-	}
-	return false
-}
-
-thing_take :: proc(ctx: ^Context, w: ^World, soldier: u8, index: u8, events: ^Events) {
-	t := &w.things[index]
-	#partial switch t.style {
-	case .Alpha_Flag, .Bravo_Flag:
-		flag_grab(t, index, soldier, events)
-	case .Weapon:
-		dropped_gun_pickup(ctx, w, t, index, soldier, events)
-	case .Medical_Kit, .Grenade_Kit, .Flamer_Kit, .Predator_Kit, .Vest_Kit, .Berserk_Kit, .Cluster_Kit:
-		kit_pickup(ctx, w, t, index, soldier, events)
+// Whoever stands by a free thing and may have it takes it: the other team'"'"'s flag, a
+// kit one can use, a gun with empty hands. The first soldier in slot order wins a tie.
+thing_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Events) {
+	if t.style == .None || t.holder != 0 do return
+	for &s, i in w.soldiers {
+		if !s.active || s.dead do continue
+		#partial switch t.style {
+		case .Alpha_Flag, .Bravo_Flag:
+			if flag_can_grab(t, &s) {
+				flag_grab(t, index, u8(i), events)
+				return
+			}
+		case .Weapon:
+			if dropped_gun_can_pickup(t, &s) {
+				dropped_gun_pickup(ctx, w, t, index, u8(i), events)
+				return
+			}
+		case .Medical_Kit, .Grenade_Kit, .Flamer_Kit, .Predator_Kit, .Vest_Kit, .Berserk_Kit, .Cluster_Kit:
+			if kit_can_pickup(w, t, &s) {
+				kit_pickup(ctx, w, t, index, u8(i), events)
+				return
+			}
+		}
 	}
 }
 

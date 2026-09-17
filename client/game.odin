@@ -73,7 +73,7 @@ process_server_messages :: proc(g: ^Game, conn: ^Connection) {
 	}
 }
 
-// One tick: this tick's command joins the pending ones; the world becomes the latest
+// One tick: this tick'"'"'s command joins the pending ones; the world becomes the latest
 // snapshot; the others are placed at the render tick; the pending commands are
 // replayed; the corpses move; and the effects are gathered.
 simulate :: proc(g: ^Game, in_: ^Input) {
@@ -132,9 +132,10 @@ place_others :: proc(g: ^Game) {
 	}
 }
 
-// My pending commands, oldest first, each a tick of my soldier, my pickups, the things
-// and the bullets. Only the newest command's step is new this tick: its events are the
-// frontier, the earlier ones were the frontier of earlier ticks.
+// My pending commands, oldest first, each a tick of my soldier, the things and the
+// bullets: the sim as it is, with the others standing where they were placed. Only the
+// newest command'"'"'s step is new this tick; its events are kept, the rest are re-runs of
+// earlier ticks and their events are thrown away.
 replay :: proc(g: ^Game) {
 	scratch: sim.Events
 	for cmd, i in g.pending {
@@ -142,7 +143,6 @@ replay :: proc(g: ^Game) {
 		sim.events_clear(events)
 		sim.soldier_step(g.ctx, &g.world, g.me, cmd, events)
 		g.predicted[cmd.seq % PREDICTED_KEPT] = g.world.soldiers[g.me].pos
-		for k in 0 ..< sim.MAX_THINGS do sim.thing_claim(g.ctx, &g.world, g.me, u8(k), events)
 		sim.things_update(g.ctx, &g.world, events)
 		sim.bullets_update(g.ctx, &g.world, events)
 	}

@@ -110,8 +110,8 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   or dropped by a death lie where they land with their ammo, resist pickup for half a
   second, and are gone after twenty. A gun let go of by a death drops where the
   soldier fell rather than carrying the body's speed as the original has it, which
-  sent a jetting soldier's gun sailing away. Pickups go through one path per kind
-  (flag, kit, gun) that the client predicts and the server decides.
+  sent a jetting soldier's gun sailing away. Whoever stands by a free thing and may
+  have it takes it, in the things' own update.
 - Online, server authority. The client says hello with its name, the server answers
   with a slot and the map and spawns the soldier on the emptier team. From then on
   the client sends only its commands, numbered by itself, the last few in every
