@@ -24,32 +24,32 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 	info := &ctx.weapons[weapon]
 	emit(events, Explosion{id = index, player = b.owner, weapon = weapon, pos = b.pos, radius = radius})
 
-	if !trusted(w, b) {
-		for &s, i in w.soldiers {
-			if !s.active || s.team == .Spectator do continue
-			if s.dead {
-				ragdoll_explosion(w, u8(i), b.pos, radius)
-				continue
+	soldiers := targets(w, b.lag) // as the thrower saw them
+	for i in 0 ..< MAX_PLAYERS {
+		s := &soldiers[i]
+		if !s.active || s.team == .Spectator do continue
+		if s.dead {
+			ragdoll_explosion(w, u8(i), b.pos, radius)
+			continue
+		}
+		pose := soldier_pose(ctx.anims, s, s.pos)
+		part := hit_part
+		if i != hit_soldier || hit_part < 0 {
+			best := max(f32)
+			for p in HIT_PARTS {
+				if d := vec2_dot(b.pos - pose[p], b.pos - pose[p]); d < best do best, part = d, p
 			}
-			pose := soldier_pose(ctx.anims, &s, s.pos)
-			part := hit_part
-			if i != hit_soldier || hit_part < 0 {
-				best := max(f32)
-				for p in HIT_PARTS {
-					if d := vec2_dot(b.pos - pose[p], b.pos - pose[p]); d < best do best, part = d, p
-				}
-			}
-			a := b.pos - pose[part]
-			dist2 := vec2_dot(a, a)
-			if dist2 >= radius * radius do continue
-			dist := sqrt_f32(dist2)
-			modifier := hitbox_modifier(info, part)
-			a *= (1 / (dist + 1)) * EXPLOSION_IMPACT_MULTIPLY
-			if kind == .Cluster do modifier *= 0.5
-			else do a.y *= 2
-			if s.cease_fire_counter < 0 {
-				emit(events, Hit{shooter = b.owner, target = u8(i), weapon = b.weapon, amount = (1 / (dist + 1)) * info.damage * modifier, part = 0, pos = pose[part], push = -a})
-			}
+		}
+		a := b.pos - pose[part]
+		dist2 := vec2_dot(a, a)
+		if dist2 >= radius * radius do continue
+		dist := sqrt_f32(dist2)
+		modifier := hitbox_modifier(info, part)
+		a *= (1 / (dist + 1)) * EXPLOSION_IMPACT_MULTIPLY
+		if kind == .Cluster do modifier *= 0.5
+		else do a.y *= 2
+		if s.cease_fire_counter < 0 {
+			emit(events, Hit{shooter = b.owner, target = u8(i), weapon = b.weapon, amount = (1 / (dist + 1)) * info.damage * modifier, part = 0, pos = pose[part], push = -a})
 		}
 	}
 

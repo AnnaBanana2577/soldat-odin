@@ -12,13 +12,14 @@ Stance :: enum u8 { Stand, Crouch, Prone }
 
 Bonus :: enum u8 { None, Flame_God, Predator, Berserker }
 
-// The fields the owner sends and the server relays as they are (net.write_owned) are
-// the first block; the rest is the server's, copied back from its rulings.
+// The first block is what its own client's commands drive and so predicts; the rest is
+// the server's alone.
 Soldier :: struct {
 	active: bool,
 	team:   Team,
 	health: f32,
 	dead:   bool,
+	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
 
 	// owned by the client that plays it
 	pos, old_pos:  Vec2,
@@ -129,7 +130,7 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 	// Between rounds nobody moves.
 	s.controls = w.round.state == .Ended ? {} : cmd.buttons
 	s.aim = cmd.aim
-	// suicide is a hit on oneself, claimed and settled like any other, and a brutal one
+	// suicide is a hit on oneself, applied like any other, and a brutal one
 	if .Suicide in s.controls do emit(events, Hit{shooter = index, target = index, amount = 4 * DEFAULT_HEALTH, pos = s.pos})
 	soldier_control(ctx, w, index, events)
 	s.direction = s.aim.x >= s.pos.x ? 1 : -1
@@ -155,20 +156,11 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 	}
 }
 
-// What the server keeps ticking on a soldier it does not simulate: the respawn timer,
-// bonuses, cease fire, a fall off the map.
-soldier_relay_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
+// The one thing that ticks on a dead soldier: the countdown to its respawn.
+soldier_dead_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
-	if s.dead {
-		s.respawn_counter -= 1
-		if s.respawn_counter < 1 do soldier_respawn(ctx, w, index, events)
-		return
-	}
-	if s.cease_fire_counter > -1 do s.cease_fire_counter -= 1
-	bonus_tick(s)
-	level := ctx.level
-	bound := f32(level.sectors_num * level.sectors_division - 50)
-	if abs(s.pos.x) > bound || abs(s.pos.y) > bound do soldier_respawn(ctx, w, index, events)
+	s.respawn_counter -= 1
+	if s.respawn_counter < 1 do soldier_respawn(ctx, w, index, events)
 }
 
 bonus_tick :: proc(s: ^Soldier) {

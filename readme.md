@@ -1,21 +1,23 @@
 # soldat-odin skeleton
 
-The shape of an Odin port on raylib and ENet, with the netcode from the Lua
-deadreck branch: clients simulate themselves and report their shots, throws, hits and
-pickups; the server relays states and things and referees claims; everyone else is
-dead-reckoned.
+The shape of an Odin port on raylib and ENet. The server is authoritative: clients
+send their commands, the server runs the one true world and sends it whole every
+tick; a client predicts itself by replaying its unacknowledged commands on the latest
+snapshot and shows everyone else interpolated between two older ones; the server
+judges shots against the soldiers as their shooter saw them.
 
 ```
 shared/sim/  the simulation, shared, one file per object: level (the map: loading,
              sectors, collision queries), soldier (movement, soldier_anim, combat,
              antics, soldier_collision), bullet (bullet_collision, explosion), damage
              (the one place health changes), thing (flag, kit, dropped_gun, parachute,
-             stat_gun), round, event (a tagged union), math
-shared/net/  the wire: Writer/Reader, Msg, Update, Throw, State, Shot, Claim, Commit,
-             Things, Clock, Fake_Link
-client/      main (init / game_loop / cleanup), input, game, view, render, audio
-             (events, soldier state, bullets passing), assets, connection, debug
-server/      main (init / server_loop / cleanup), game (referee / step_things / relay),
+             stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
+             union), math
+shared/net/  the wire: Writer/Reader, Msg, Hello/Welcome, Input, Snapshot, Fake_Link
+client/      main (init / game_loop / cleanup), input, game (reset / place others /
+             replay / effects), interp (the snapshot ring and the render clock), render,
+             audio, assets, connection, debug
+server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
              connection
 ```
 
@@ -37,9 +39,8 @@ The server loop, server/main.odin:
 ```
 receive_client_messages
 tick accumulator:
-  referee
-  step_things
-  relay
+  tick            one command per client, the world stepped, the hits applied
+  send_snapshots
 sleep until the next tick
 ```
 
@@ -109,24 +110,29 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   or dropped by a death lie where they land with their ammo, resist pickup for half a
   second, and are gone after twenty. A gun let go of by a death drops where the
   soldier fell rather than carrying the body's speed as the original has it, which
-  sent a jetting soldier's gun sailing away. Pickups go through one claim path per kind
-  (flag, kit, gun) that the client predicts and the server referees.
-- Online: the client says hello with its name, the server answers with a slot and
-  the map and spawns the soldier on the emptier team. Each tick every client sends
-  its owned soldier state and its recent shots; the server copies the owned fields,
-  sends every soldier back to everyone with the packet's age (the server's fields,
-  cease fire and the counters, ride along), relays the shots to the others, and
-  sends the round's clock. The things are event driven: the server sends a thing
-  whole when it appears or goes, changes hands, or starts or stops moving (and all
-  of them once to a newcomer); from those numbers every client runs the same
-  physics until the next change, so nothing about things crosses the wire in
-  between. Remote soldiers are moved on by the age plus half the round trip
-  and dead-reckoned on their last controls, with a rate-limited drawn offset where a
-  state lands them elsewhere. Only what another player could contest is a claim: a
-  hit and a pickup, settled in arrival order, answered with a commit everyone applies
-  the same way or a reject; a predicted pickup holds until its answer. A thrown gun
-  is an event, like a shot: the server throws it from the thrower's relayed pose and
-  sends the thing. A client's world makes no things of its own.
+  sent a jetting soldier's gun sailing away. Pickups go through one path per kind
+  (flag, kit, gun) that the client predicts and the server decides.
+- Online, server authority. The client says hello with its name, the server answers
+  with a slot and the map and spawns the soldier on the emptier team. From then on
+  the client sends only its commands, numbered by itself, the last few in every
+  packet so a lost one costs nothing. The server keeps a short queue per client,
+  applies one command per tick (the last one again, without its one-shot buttons,
+  when none has arrived), steps the whole world, applies the hits, and sends every
+  client a snapshot: every soldier, thing and bullet whole, the round, the tick's
+  events, and for the receiver its last applied command and how many were waiting.
+  The client rebuilds its world from the newest snapshot every tick and replays its
+  pending commands on it, which predicts everything they touch: its movement, its
+  shots and their flight, its pickups, the things it holds. Everyone else and their
+  bullets are placed from two older snapshots, interpolated at a render tick that
+  runs a few ticks behind the newest, and the tick's events are applied as the render
+  tick passes them. The client runs its clock a little faster or slower to hold the
+  server's queue at a small target, and the render tick likewise to hold its
+  distance, so the two never need to agree on a clock. A correction, the server
+  putting the soldier elsewhere than predicted for the same command, is drawn as an
+  offset that blends out. Each command says which tick the client shows the others
+  at, and the server keeps the last second of soldiers so a shot meets them as its
+  shooter saw them, for as long as it flies. The state crosses the wire as the sim's
+  structs byte for byte; a portable, delta-compressed encoding is a later step.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg

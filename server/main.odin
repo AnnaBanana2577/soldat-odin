@@ -4,9 +4,8 @@
 //   while running:
 //     receive client messages
 //     tick accumulator:
-//       referee
-//       step things
-//       relay
+//       tick (one command per client, the world stepped, the hits applied)
+//       send snapshots
 //     sleep until the next tick
 //   cleanup
 package server
@@ -55,9 +54,8 @@ server_loop :: proc() {
 	server.accumulator += time.duration_seconds(time.tick_diff(server.last, now))
 	server.last = now
 	for server.accumulator >= TICK {
-		referee(&server.game)
-		step_things(&server.game)
-		relay(&server.game, &server.host)
+		tick(&server.game)
+		send_snapshots(&server.game, &server.host)
 		server.accumulator -= TICK
 	}
 	time.sleep(time.Millisecond)

@@ -80,7 +80,7 @@ soldier_collide :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 }
 
 // What a special poly does when a soldier touches it (HandleSpecialPolyTypes). The
-// soldier reports its own wound as a Hit on itself, and its client claims it.
+// soldier reports its own wound as a Hit on itself.
 @(private = "file")
 handle_special_poly :: proc(ctx: ^Context, w: ^World, index: u8, t: Poly_Type, pos: Vec2, events: ^Events) {
 	s := &w.soldiers[index]

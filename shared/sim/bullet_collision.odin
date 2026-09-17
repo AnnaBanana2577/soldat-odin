@@ -5,8 +5,8 @@ package sim
 // still see its path, and only a nearer hit wins. Ported from Bullets.pas by way of
 // the old Odin port.
 //
-// A soldier hit is a Hit event, never a wound: the caller decides. A human's bullet
-// (w.humans, on the server) never touches soldiers here: its client reports.
+// A soldier hit is a Hit event, never a wound: whoever applies the events decides
+// (the server does; a client only shows the blood).
 
 GRENADE_SURFACECOEF :: 0.88
 PART_RADIUS         :: 7
@@ -37,21 +37,13 @@ bullet_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, events:
 		b.vel, b.pos, b.old_pos = saved_vel, saved_pos, saved_old
 	}
 
-	if !trusted(w, b) {
-		point, hit := soldier_collide_bullet(ctx, w, b, index, nearest, events)
-		if !b.active {
-			stop := hit ? point : hit_collider ? collider : wall
-			nearest = vec2_length(stop - saved_old)
-		}
+	point, hit := soldier_collide_bullet(ctx, w, b, index, nearest, events)
+	if !b.active {
+		stop := hit ? point : hit_collider ? collider : wall
+		nearest = vec2_length(stop - saved_old)
 	}
 
 	thing_collide_bullet(ctx, w, b, nearest, events)
-}
-
-// Whether this world leaves the bullet's hits on soldiers to its shooter's client.
-trusted :: proc(w: ^World, b: ^Bullet) -> bool {
-	if b.style == .M2 do return false // the stationary gun fires on the server, whoever holds it
-	return int(b.owner) in w.humans
 }
 
 @(private = "file")
@@ -87,12 +79,12 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 
 			#partial switch b.style {
 			case .Plain, .Shotgun, .Punch, .Knife, .M2:
-				if ricochet(level, w, b, index, poly, pos, team, events) do emit(events, Ricochet{id = index, pos = b.pos, vel = b.vel})
-				else do emit(events, Wall_Hit{id = index, weapon = b.weapon, pos = pos, vel = b.vel})
+				if ricochet(level, w, b, index, poly, pos, team, events) do emit(events, Ricochet{id = index, owner = b.owner, pos = b.pos, vel = b.vel})
+				else do emit(events, Wall_Hit{id = index, owner = b.owner, weapon = b.weapon, pos = pos, vel = b.vel})
 			case .M79, .Flame_Arrow, .LAW:
 				before := pos - b.vel
 				if ricochet(level, w, b, index, poly, pos, team, events) {
-					emit(events, Ricochet{id = index, pos = b.pos, vel = b.vel})
+					emit(events, Ricochet{id = index, owner = b.owner, pos = b.pos, vel = b.vel})
 				} else {
 					b.pos = before
 					explode(ctx, w, b, index, .M79, -1, -1, events)
@@ -104,21 +96,21 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 				b.timeout = min(b.timeout, ARROW_RESIST)
 				if b.timeout < 20 do b.forces.y += w.gravity * BULLET_GRAVITY
 			case .Frag_Grenade, .Flame:
-				if b.style == .Frag_Grenade && vec2_length(b.vel) > 1.5 do emit(events, Grenade_Bounce{id = index, pos = pos})
+				if b.style == .Frag_Grenade && vec2_length(b.vel) > 1.5 do emit(events, Grenade_Bounce{id = index, owner = b.owner, pos = pos})
 				normal, dist, _ := closest_perpendicular(poly, b.pos)
 				b.pos = pos
 				b.vel = (b.vel - vec2_normalize(normal) * dist) * GRENADE_SURFACECOEF
 				if b.style == .Flame do b.timeout = min(b.timeout, 16)
 			case .Cluster_Nade:
 				cluster_split(ctx, w, b, events)
-				emit(events, Cluster_Split{id = index, pos = b.pos})
+				emit(events, Cluster_Split{id = index, owner = b.owner, pos = b.pos})
 				bullet_end(w, b, index, events)
 			case .Cluster:
 				explode(ctx, w, b, index, .Cluster, -1, -1, events)
 				bullet_end(w, b, index, events)
 			case .Thrown_Knife:
 				b.pos = pos - b.vel
-				emit(events, Wall_Hit{id = index, weapon = b.weapon, pos = pos, vel = b.vel})
+				emit(events, Wall_Hit{id = index, owner = b.owner, weapon = b.weapon, pos = pos, vel = b.vel})
 				dropped_gun_land_knife(w, b)
 				bullet_end(w, b, index, events, pos)
 			}
@@ -180,7 +172,7 @@ collider_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, neare
 		#partial switch b.style {
 		case .Plain, .Shotgun, .Punch, .Knife, .Thrown_Knife, .M2:
 			b.pos = p - b.vel
-			emit(events, Collider_Hit{id = index, pos = p, vel = b.vel})
+			emit(events, Collider_Hit{id = index, owner = b.owner, pos = p, vel = b.vel})
 			if b.style == .Thrown_Knife do dropped_gun_land_knife(w, b)
 			bullet_end(w, b, index, events, p)
 		case .Frag_Grenade:
@@ -194,7 +186,7 @@ collider_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, neare
 		case .Arrow:
 			if b.timeout > ARROW_RESIST {
 				b.forces.y -= w.gravity * BULLET_GRAVITY
-				emit(events, Wall_Hit{id = index, weapon = b.weapon, pos = p, vel = b.vel})
+				emit(events, Wall_Hit{id = index, owner = b.owner, weapon = b.weapon, pos = p, vel = b.vel})
 				bullet_end(w, b, index, events, p)
 			}
 		case .M79, .Flame_Arrow, .LAW:
@@ -202,7 +194,7 @@ collider_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, neare
 			bullet_end(w, b, index, events)
 		case .Cluster_Nade:
 			cluster_split(ctx, w, b, events)
-			emit(events, Cluster_Split{id = index, pos = b.pos})
+			emit(events, Cluster_Split{id = index, owner = b.owner, pos = b.pos})
 			bullet_end(w, b, index, events)
 		case .Cluster:
 			explode(ctx, w, b, index, .Cluster, -1, -1, events)
@@ -223,6 +215,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 
 	info := &ctx.weapons[b.weapon]
 	owner := &w.soldiers[b.owner]
+	soldiers := targets(w, b.lag) // as the shooter saw them
 	melee := b.style == .Punch || b.style == .Knife
 
 	owner_vulnerable_after: i32
@@ -238,7 +231,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 	dists: [MAX_PLAYERS]f32
 	count := 0
 	for i in 0 ..< MAX_PLAYERS {
-		s := &w.soldiers[i]
+		s := &soldiers[i]
 		if !s.active || s.dead || i == int(b.hit_body) do continue // TODO corpses are targets too (ragdoll)
 		if i == int(b.owner) && b.timeout >= owner_vulnerable_after do continue
 		d := vec2_dot(b.pos - s.pos, b.pos - s.pos)
@@ -254,7 +247,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 	radius: f32 = b.style == .Frag_Grenade ? PART_RADIUS + 1 : PART_RADIUS
 	for c in 0 ..< count {
 		ti := order[c]
-		target := &w.soldiers[ti]
+		target := &soldiers[ti]
 		if melee && ti == int(b.owner) do continue
 
 		start, end: Vec2
@@ -299,7 +292,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			b.hit_body = i8(ti)
 			// a punched enemy starts throwing its gun away
 			if b.style == .Punch && (target.team == .None || target.team != owner.team) && target.weapon.id != .Bow && target.weapon.id != .Bow2 {
-				anim_apply(ctx.anims, &target.body, .Throw_Weapon, 11)
+				anim_apply(ctx.anims, &w.soldiers[ti].body, .Throw_Weapon, 11) // the live one, not the frame
 			}
 			// fast bullets pierce and go on to the next soldier
 			if speed > 23 {

@@ -131,7 +131,6 @@ thing_place :: proc(ctx: ^Context, t: ^Thing, style: Thing_Style, pos: Vec2, wea
 }
 
 thing_create :: proc(ctx: ^Context, w: ^World, style: Thing_Style, pos: Vec2, weapon: Weapon_Id = .None) -> (index: int, ok: bool) {
-	if w.things_relayed do return 0, false
 	for &t, i in w.things {
 		if t.style != .None || t.respawn_wait > 0 do continue
 		thing_place(ctx, &t, style, pos, weapon)

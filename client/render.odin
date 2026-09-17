@@ -220,9 +220,10 @@ draw_soldiers :: proc(g: ^Game, assets: ^Assets, alpha: f32) {
 	for &s, i in g.world.soldiers {
 		if !s.active do continue
 		r := &g.world.ragdolls[i]
-		if s.dead && !r.active do continue // dead before its corpse has started
-		pose := s.dead ? sim.ragdoll_pose(r, alpha) : sim.soldier_pose(g.ctx.anims, &s, g.view.drawn[i])
-		gostek_draw(&assets.gostek, &s, &pose, s.dead)
+		// a dead soldier whose kill has not come yet holds its last pose
+		corpse := s.dead && r.active
+		pose := corpse ? sim.ragdoll_pose(r, alpha) : sim.soldier_pose(g.ctx.anims, &s, drawn_pos(g, i, alpha))
+		gostek_draw(&assets.gostek, &s, &pose, corpse)
 	}
 }
 

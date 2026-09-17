@@ -17,8 +17,7 @@ dropped_gun_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, event
 }
 
 // The gun leaves the hand: the grip barely moved, the muzzle flung along the aim
-// (a throw) or given the killing impact (a death). The event goes out even where the
-// thing is not made (a client's world): a thrown gun is claimed by it.
+// (a throw) or given the killing impact (a death).
 dropped_gun_create :: proc(ctx: ^Context, w: ^World, weapon: Weapon_Id, owner: u8, pos: Vec2, dead: bool, impact: Vec2, ammo: i32, events: ^Events) {
 	if GUN_OBJECTS[weapon].scale == 0 do return // the flamer and the hands are never dropped
 	emit(events, Weapon_Drop{player = owner, weapon = weapon, ammo = ammo, thrown = !dead})

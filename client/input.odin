@@ -13,8 +13,6 @@ Input :: struct {
 	aim:     sim.Vec2, // the cursor in world space
 }
 
-ONE_SHOT :: sim.Buttons{.Throw, .Change, .Prone, .Drop, .Suicide, .Flag_Throw, .Reload}
-
 Bind :: struct {
 	key:    rl.KeyboardKey,
 	button: sim.Button,
@@ -35,7 +33,7 @@ sample_input :: proc(in_: ^Input, camera: ^Camera, scripted: sim.Buttons) {
 	if rl.IsMouseButtonDown(.LEFT) do held += {.Fire}
 	if rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
 	// a one-shot button counts from the frame it goes down until a tick consumes it
-	in_.pressed += (held - in_.held) & ONE_SHOT
+	in_.pressed += (held - in_.held) & sim.ONE_SHOT
 	in_.held = held
 	m := rl.GetMousePosition()
 	in_.aim = screen_to_world(camera, {m.x, m.y})

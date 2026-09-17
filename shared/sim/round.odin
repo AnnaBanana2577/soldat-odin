@@ -36,7 +36,7 @@ round_init :: proc(r: ^Round) {
 round_tick :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 	r := &w.round
 	for &s, i in w.soldiers {
-		if s.active && i in w.humans do soldier_relay_tick(ctx, w, u8(i), events)
+		if s.active && s.dead do soldier_dead_tick(ctx, w, u8(i), events)
 	}
 	if r.state != .Playing do return
 	r.time_left -= 1

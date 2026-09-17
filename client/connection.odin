@@ -96,7 +96,7 @@ conn_receive :: proc(c: ^Connection) -> [][]u8 {
 }
 
 conn_send :: proc(c: ^Connection, data: []u8, reliable: bool) {
-	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNSEQUENCED}
+	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNRELIABLE_FRAGMENT}
 	packet := enet.packet_create(raw_data(data), len(data), flags)
 	enet.peer_send(c.peer, reliable ? net.CHANNEL_RELIABLE : net.CHANNEL_UNRELIABLE, packet)
 }

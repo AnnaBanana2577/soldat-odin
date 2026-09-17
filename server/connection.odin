@@ -90,7 +90,7 @@ host_broadcast :: proc(h: ^Host, data: []u8, reliable: bool) {
 
 peer_send :: proc(peer: ^enet.Peer, data: []u8, reliable: bool) {
 	if peer == nil do return
-	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNSEQUENCED}
+	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNRELIABLE_FRAGMENT}
 	packet := enet.packet_create(raw_data(data), len(data), flags)
 	enet.peer_send(peer, reliable ? net.CHANNEL_RELIABLE : net.CHANNEL_UNRELIABLE, packet)
 }

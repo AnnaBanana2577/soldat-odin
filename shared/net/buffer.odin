@@ -1,16 +1,18 @@
 package net
 
 import "core:encoding/endian"
+import "core:mem"
 
 // Little-endian byte writer and reader over a fixed buffer. A reader that runs out
 // of bytes sets ok = false and returns zeros from then on, so decoders check ok once
 // at the end instead of after every field.
 
-MAX_PACKET :: 1400
+MAX_PACKET :: 96 * 1024 // a snapshot of everything fits; ENet fragments what a datagram cannot hold
 
 Writer :: struct {
-	buf: [MAX_PACKET]u8,
-	len: int,
+	buf:      [MAX_PACKET]u8,
+	len:      int,
+	overflow: bool, // a write did not fit: the packet must not go out
 }
 
 Reader :: struct {
@@ -27,7 +29,26 @@ write_u8 :: proc(w: ^Writer, v: u8) {
 	if w.len < MAX_PACKET {
 		w.buf[w.len] = v
 		w.len += 1
+	} else do w.overflow = true
+}
+
+// A struct byte for byte: the same build runs on both ends.
+write_raw :: proc(w: ^Writer, p: rawptr, n: int) {
+	if w.len + n > MAX_PACKET {
+		w.overflow = true
+		return
 	}
+	mem.copy(&w.buf[w.len], p, n)
+	w.len += n
+}
+
+read_raw :: proc(r: ^Reader, p: rawptr, n: int) {
+	if r.pos + n > len(r.data) {
+		r.ok = false
+		return
+	}
+	mem.copy(p, &r.data[r.pos], n)
+	r.pos += n
 }
 
 write_u16 :: proc(w: ^Writer, v: u16) {
@@ -118,4 +139,23 @@ read_f64 :: proc(r: ^Reader) -> f64 {
 
 read_bool :: proc(r: ^Reader) -> bool {
 	return read_u8(r) != 0
+}
+
+// A short string: its length in a byte, then the bytes. The reader's string points
+// into the packet; clone it to keep it.
+write_string :: proc(w: ^Writer, s: string) {
+	n := min(len(s), 255)
+	write_u8(w, u8(n))
+	for i in 0 ..< n do write_u8(w, s[i])
+}
+
+read_string :: proc(r: ^Reader) -> string {
+	n := int(read_u8(r))
+	if r.pos + n > len(r.data) {
+		r.ok = false
+		return ""
+	}
+	s := string(r.data[r.pos:r.pos + n])
+	r.pos += n
+	return s
 }

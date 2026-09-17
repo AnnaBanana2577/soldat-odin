@@ -87,7 +87,6 @@ init :: proc() {
 		os.exit(1)
 	}
 	game_init(&app.game, &app.assets.ctx, app.conn.slot)
-	app.game.world.things_relayed = true
 	debug_init(&app.debug, &app.game)
 }
 
@@ -99,7 +98,7 @@ game_loop :: proc() {
 	dt := frame_seconds()
 	sample_input(&app.input, &app.game.camera, app.debug.hold)
 	if app.debug.has_aim do app.input.aim = app.game.camera.pos + app.debug.aim
-	app.accumulator = min(app.accumulator + dt, MAX_FRAME)
+	app.accumulator = min(app.accumulator + dt * app.game.time_scale, MAX_FRAME)
 	for app.accumulator >= TICK {
 		sim.events_clear(&app.game.events)
 		process_server_messages(&app.game, &app.conn)

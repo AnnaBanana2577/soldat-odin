@@ -46,7 +46,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 		}
 	}
 	// the server's own checks: a carrier home with the other flag scores, a loose flag
-	// touched by its own team goes home (not claims: the server judges these)
+	// touched by its own team goes home
 	if t.holder > 0 do flag_capture(ctx, w, t, index, events)
 	if t.holder == 0 && !t.in_base do flag_return_touch(ctx, w, t, events)
 }

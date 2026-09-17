@@ -1,284 +1,33 @@
 // Package net is the wire protocol. Transport is ENet (vendor:ENet); this package only
 // encodes and decodes messages.
 //
-// Client -> server: an Update per tick (my soldier's owned fields, my recent shots), a
-// Throw for a gun let go of, and Claims for what someone else could contest (a hit I
-// scored, a thing I took). Server -> clients: everyone's State with its age, Shots,
-// Commits (claims settled), Rejects, the Things and the Clock.
+// The server is authoritative: clients send Inputs (their commands, numbered by
+// themselves), the server runs the one true world and sends every client a Snapshot
+// of it each tick: the soldiers, things and bullets whole, the tick's events, and for
+// the receiver its last applied command and how many were waiting. A client predicts
+// itself by replaying its unacknowledged commands on the latest snapshot and shows
+// everyone else interpolated between two older ones.
+//
+// The state goes as the sim's structs, byte for byte: the same build runs on both
+// ends. A portable, delta-compressed encoding is a later step.
 package net
 
 import "../sim"
 
-VERSION      :: 1
+VERSION      :: 2
 DEFAULT_PORT :: 23073
 
-CHANNEL_UNRELIABLE :: 0 // updates, states, shots, clock
-CHANNEL_RELIABLE   :: 1 // handshake, lobby, claims, commits, rejects
+CHANNEL_UNRELIABLE :: 0 // inputs, snapshots
+CHANNEL_RELIABLE   :: 1 // the handshake, the lobby
 CHANNEL_COUNT      :: 2
-
-MAX_SHOTS_PER_PACKET :: 16
 
 Msg :: enum u8 {
 	None,
 	// the lobby, reliable
 	Hello, Welcome, Denied, Roster, Chat, Leave, Map_Change, Settings,
-	// the game
-	Update, // client -> server: my soldier and my shots
-	Throw,  // client -> server: the gun I threw, an event like a shot, never refused
-	State,  // server -> clients: one soldier as its owner last sent it, and how old that is
-	Shot,   // server -> clients: a bullet someone fired, as they fired it
-	Claim,  // client -> server: a change I want beyond my own soldier
-	Commit, // server -> clients: a claim settled, applied the same way in every world
-	Reject, // server -> the claimant: a claim refused; nothing to undo, it changed nothing
-	Clock,  // server -> clients: the round as it stands
-	Things, // server -> clients: things whole, each when it changes, all on joining
-}
-
-Shot :: struct {
-	id:       u32,
-	sends:    u8, // the shooter's own bookkeeping, not on the wire: packets it has ridden in
-	weapon:   sim.Weapon_Id,
-	pos, vel: sim.Vec2,
-	damage:   f32,
-}
-
-Update :: struct {
-	seq:        u32,
-	has_state:  bool,
-	state:      sim.Soldier, // only the owned fields cross the wire
-	shots:      [MAX_SHOTS_PER_PACKET]Shot,
-	shot_count: int,
-}
-
-// Only what another player could contest is claimed: a hit (target, weapon, amount,
-// part, pos and vel, the knockback) and a pickup (the thing).
-Claim_Kind :: enum u8 { Hit, Pickup }
-
-// Numbered by the claimant; the server answers each once, in arrival order.
-Claim :: struct {
-	id:       u32,
-	kind:     Claim_Kind,
-	target:   u8, // the soldier hit, or the thing
-	weapon:   sim.Weapon_Id,
-	amount:   f32,
-	part:     u8,
-	pos, vel: sim.Vec2,
-	sent:     bool, // the claimant's own bookkeeping, not on the wire
-}
-
-Commit :: struct {
-	tick:   u32,
-	player: u8, // the claimant, or 0 for the server's own changes
-	claim:  Claim,
-}
-
-State :: struct {
-	slot:    u8,
-	age:     u8, // ticks since the owner's packet arrived at the server
-	soldier: sim.Soldier,
-}
-
-// ---- the owned soldier fields, in wire order ----
-
-write_owned :: proc(w: ^Writer, s: ^sim.Soldier) {
-	write_f32(w, s.pos.x)
-	write_f32(w, s.pos.y)
-	write_f32(w, s.vel.x)
-	write_f32(w, s.vel.y)
-	write_f32(w, s.next_push.x)
-	write_f32(w, s.next_push.y)
-	write_u16(w, transmute(u16)s.controls)
-	write_f32(w, s.aim.x)
-	write_f32(w, s.aim.y)
-	write_u8(w, u8(s.direction))
-	write_bool(w, s.on_ground)
-	write_u32(w, u32(s.jets))
-	write_u8(w, u8(s.legs.id))
-	write_u32(w, u32(s.legs.frame))
-	write_u8(w, u8(s.body.id))
-	write_u32(w, u32(s.body.frame))
-	write_u8(w, u8(s.weapon.id))
-	write_u32(w, u32(s.weapon.ammo))
-	write_u8(w, u8(s.secondary.id))
-	write_u32(w, u32(s.secondary.ammo))
-	write_u8(w, u8(s.grenades))
-	write_bool(w, s.spawn_still)
-	write_u8(w, s.para)
-	write_u8(w, s.stat)
-}
-
-read_owned :: proc(r: ^Reader, s: ^sim.Soldier) {
-	s.pos = {read_f32(r), read_f32(r)}
-	s.vel = {read_f32(r), read_f32(r)}
-	s.next_push = {read_f32(r), read_f32(r)}
-	s.controls = transmute(sim.Buttons)read_u16(r)
-	s.aim = {read_f32(r), read_f32(r)}
-	s.direction = i8(read_u8(r))
-	s.on_ground = read_bool(r)
-	s.jets = i32(read_u32(r))
-	s.legs.id = sim.Anim_Id(read_u8(r))
-	s.legs.frame = i32(read_u32(r))
-	s.body.id = sim.Anim_Id(read_u8(r))
-	s.body.frame = i32(read_u32(r))
-	s.weapon.id = sim.Weapon_Id(read_u8(r))
-	s.weapon.ammo = i32(read_u32(r))
-	s.secondary.id = sim.Weapon_Id(read_u8(r))
-	s.secondary.ammo = i32(read_u32(r))
-	s.grenades = i32(read_u8(r))
-	s.spawn_still = read_bool(r)
-	s.para = read_u8(r)
-	s.stat = read_u8(r)
-}
-
-// ---- update ----
-
-write_shot :: proc(w: ^Writer, s: ^Shot) {
-	write_u32(w, s.id)
-	write_u8(w, u8(s.weapon))
-	write_f32(w, s.pos.x)
-	write_f32(w, s.pos.y)
-	write_f32(w, s.vel.x)
-	write_f32(w, s.vel.y)
-	write_f32(w, s.damage)
-}
-
-read_shot :: proc(r: ^Reader) -> (s: Shot) {
-	s.id = read_u32(r)
-	s.weapon = sim.Weapon_Id(read_u8(r))
-	s.pos = {read_f32(r), read_f32(r)}
-	s.vel = {read_f32(r), read_f32(r)}
-	s.damage = read_f32(r)
-	return
-}
-
-encode_update :: proc(w: ^Writer, m: ^Update) {
-	write_u8(w, u8(Msg.Update))
-	write_u32(w, m.seq)
-	write_bool(w, m.has_state)
-	if m.has_state do write_owned(w, &m.state)
-	write_u8(w, u8(m.shot_count))
-	for i in 0 ..< m.shot_count do write_shot(w, &m.shots[i])
-}
-
-decode_update :: proc(r: ^Reader) -> (m: Update, ok: bool) {
-	m.seq = read_u32(r)
-	m.has_state = read_bool(r)
-	if m.has_state do read_owned(r, &m.state)
-	m.shot_count = min(int(read_u8(r)), MAX_SHOTS_PER_PACKET)
-	for i in 0 ..< m.shot_count do m.shots[i] = read_shot(r)
-	return m, r.ok
-}
-
-// ---- state (server -> clients) ----
-
-// The server's fields ride with the owned ones: what the server decided about the soldier.
-write_served :: proc(w: ^Writer, s: ^sim.Soldier) {
-	write_bool(w, s.active)
-	write_bool(w, s.dead)
-	write_u8(w, u8(s.team))
-	write_f32(w, s.health)
-	write_u32(w, u32(s.respawn_counter))
-	write_u32(w, u32(s.cease_fire_counter))
-	write_f32(w, s.vest)
-	write_u8(w, u8(s.bonus))
-	write_u32(w, u32(s.bonus_time))
-	write_bool(w, s.holding_flag)
-	write_u32(w, u32(s.kills))
-	write_u32(w, u32(s.deaths))
-	write_u32(w, u32(s.flags))
-}
-
-read_served :: proc(r: ^Reader, s: ^sim.Soldier) {
-	s.active = read_bool(r)
-	s.dead = read_bool(r)
-	s.team = sim.Team(read_u8(r))
-	s.health = read_f32(r)
-	s.respawn_counter = i32(read_u32(r))
-	s.cease_fire_counter = i32(read_u32(r))
-	s.vest = read_f32(r)
-	s.bonus = sim.Bonus(read_u8(r))
-	s.bonus_time = i32(read_u32(r))
-	s.holding_flag = read_bool(r)
-	s.kills = i32(read_u32(r))
-	s.deaths = i32(read_u32(r))
-	s.flags = i32(read_u32(r))
-}
-
-encode_state :: proc(w: ^Writer, m: ^State) {
-	write_u8(w, u8(Msg.State))
-	write_u8(w, m.slot)
-	write_u8(w, m.age)
-	write_served(w, &m.soldier)
-	write_owned(w, &m.soldier)
-}
-
-decode_state :: proc(r: ^Reader) -> (m: State, ok: bool) {
-	m.slot = read_u8(r)
-	m.age = read_u8(r)
-	read_served(r, &m.soldier)
-	read_owned(r, &m.soldier)
-	return m, r.ok
-}
-
-// ---- claims and commits ----
-
-write_claim :: proc(w: ^Writer, c: ^Claim) {
-	write_u32(w, c.id)
-	write_u8(w, u8(c.kind))
-	write_u8(w, c.target)
-	write_u8(w, u8(c.weapon))
-	write_f32(w, c.amount)
-	write_u8(w, c.part)
-	write_f32(w, c.pos.x)
-	write_f32(w, c.pos.y)
-	write_f32(w, c.vel.x)
-	write_f32(w, c.vel.y)
-}
-
-read_claim :: proc(r: ^Reader) -> (c: Claim) {
-	c.id = read_u32(r)
-	c.kind = Claim_Kind(read_u8(r))
-	c.target = read_u8(r)
-	c.weapon = sim.Weapon_Id(read_u8(r))
-	c.amount = read_f32(r)
-	c.part = read_u8(r)
-	c.pos = {read_f32(r), read_f32(r)}
-	c.vel = {read_f32(r), read_f32(r)}
-	return
-}
-
-encode_claim :: proc(w: ^Writer, c: ^Claim) {
-	write_u8(w, u8(Msg.Claim))
-	write_claim(w, c)
-}
-
-decode_claim :: proc(r: ^Reader) -> (c: Claim, ok: bool) {
-	c = read_claim(r)
-	return c, r.ok
-}
-
-encode_commit :: proc(w: ^Writer, m: ^Commit) {
-	write_u8(w, u8(Msg.Commit))
-	write_u32(w, m.tick)
-	write_u8(w, m.player)
-	write_claim(w, &m.claim)
-}
-
-decode_commit :: proc(r: ^Reader) -> (m: Commit, ok: bool) {
-	m.tick = read_u32(r)
-	m.player = read_u8(r)
-	m.claim = read_claim(r)
-	return m, r.ok
-}
-
-encode_reject :: proc(w: ^Writer, id: u32) {
-	write_u8(w, u8(Msg.Reject))
-	write_u32(w, id)
-}
-
-decode_reject :: proc(r: ^Reader) -> (id: u32, ok: bool) {
-	id = read_u32(r)
-	return id, r.ok
+	// the game, unreliable
+	Input,    // client -> server: my recent commands
+	Snapshot, // server -> client: the world as of one tick
 }
 
 // ---- the handshake (reliable) ----
@@ -296,28 +45,10 @@ Welcome :: struct {
 	map_name: string,
 }
 
-write_string :: proc(w: ^Writer, s: string, limit: int) {
-	n := min(len(s), limit, 255)
-	write_u8(w, u8(n))
-	for i in 0 ..< n do write_u8(w, s[i])
-}
-
-// Into the reader's own bytes: valid as long as the packet is.
-read_string :: proc(r: ^Reader) -> string {
-	n := int(read_u8(r))
-	if r.pos + n > len(r.data) {
-		r.ok = false
-		return ""
-	}
-	s := string(r.data[r.pos:r.pos + n])
-	r.pos += n
-	return s
-}
-
 encode_hello :: proc(w: ^Writer, name: string) {
 	write_u8(w, u8(Msg.Hello))
 	write_u16(w, VERSION)
-	write_string(w, name, MAX_NAME)
+	write_string(w, name[:min(len(name), MAX_NAME)])
 }
 
 decode_hello :: proc(r: ^Reader) -> (m: Hello, ok: bool) {
@@ -330,7 +61,7 @@ encode_welcome :: proc(w: ^Writer, m: Welcome) {
 	write_u8(w, u8(Msg.Welcome))
 	write_u8(w, m.slot)
 	write_u32(w, m.tick)
-	write_string(w, m.map_name, 64)
+	write_string(w, m.map_name)
 }
 
 decode_welcome :: proc(r: ^Reader) -> (m: Welcome, ok: bool) {
@@ -342,144 +73,113 @@ decode_welcome :: proc(r: ^Reader) -> (m: Welcome, ok: bool) {
 
 encode_denied :: proc(w: ^Writer, reason: string) {
 	write_u8(w, u8(Msg.Denied))
-	write_string(w, reason, 200)
+	write_string(w, reason)
 }
 
-// ---- a shot relayed (server -> clients, unreliable) ----
+// ---- inputs (client -> server, unreliable, every tick) ----
 
-Shot_Relay :: struct {
-	player: u8,
-	shot:   Shot,
+// The last few commands, oldest first, so a lost packet loses nothing: the server
+// keeps the ones it has not seen. `view_tick` is the server tick the client is
+// showing the others at, for the server to judge its shots against.
+MAX_COMMANDS_PER_INPUT :: 8
+
+Input :: struct {
+	view_tick: u32,
+	commands:  [MAX_COMMANDS_PER_INPUT]sim.Command,
+	count:     int,
 }
 
-encode_shot :: proc(w: ^Writer, m: Shot_Relay) {
-	m := m
-	write_u8(w, u8(Msg.Shot))
-	write_u8(w, m.player)
-	write_shot(w, &m.shot)
-}
-
-decode_shot :: proc(r: ^Reader) -> (m: Shot_Relay, ok: bool) {
-	m.player = read_u8(r)
-	m.shot = read_shot(r)
-	return m, r.ok
-}
-
-// ---- things (server -> clients, reliable) ----
-//
-// A thing goes whole, both positions of every point, so the receiver runs the same
-// physics on from the same numbers. One goes when it changes (appears, goes, changes
-// hands, starts or stops moving), all of them once to a newcomer.
-
-MAX_THINGS_PER_PACKET :: 12
-
-Thing_State :: struct {
-	index: u8,
-	thing: sim.Thing,
-}
-
-Things_Relay :: struct {
-	items: [MAX_THINGS_PER_PACKET]Thing_State,
-	count: int,
-}
-
-write_thing :: proc(w: ^Writer, t: ^sim.Thing) {
-	write_u8(w, u8(t.style))
-	write_u8(w, u8(t.weapon))
-	write_u32(w, u32(t.ammo))
-	write_bool(w, t.flip)
-	write_u8(w, t.holder)
-	write_u8(w, t.owner)
-	write_u32(w, u32(t.timeout))
-	write_bool(w, t.static)
-	write_u8(w, u8(t.points))
-	write_bool(w, t.in_base)
-	write_u8(w, u8(t.interest))
-	for k in 0 ..< 4 {
-		write_f32(w, t.pos[k].x)
-		write_f32(w, t.pos[k].y)
-		write_f32(w, t.old_pos[k].x)
-		write_f32(w, t.old_pos[k].y)
-	}
-}
-
-read_thing :: proc(r: ^Reader) -> (t: sim.Thing) {
-	t.style = sim.Thing_Style(read_u8(r))
-	t.weapon = sim.Weapon_Id(read_u8(r))
-	t.ammo = i32(read_u32(r))
-	t.flip = read_bool(r)
-	t.holder = read_u8(r)
-	t.owner = read_u8(r)
-	t.timeout = i32(read_u32(r))
-	t.static = read_bool(r)
-	t.points = int(read_u8(r))
-	t.in_base = read_bool(r)
-	t.interest = i32(read_u8(r))
-	for k in 0 ..< 4 {
-		t.pos[k] = {read_f32(r), read_f32(r)}
-		t.old_pos[k] = {read_f32(r), read_f32(r)}
-	}
-	return
-}
-
-encode_things :: proc(w: ^Writer, m: ^Things_Relay) {
-	write_u8(w, u8(Msg.Things))
+encode_input :: proc(w: ^Writer, m: ^Input) {
+	write_u8(w, u8(Msg.Input))
+	write_u32(w, m.view_tick)
 	write_u8(w, u8(m.count))
-	for i in 0 ..< m.count {
-		write_u8(w, m.items[i].index)
-		write_thing(w, &m.items[i].thing)
-	}
+	for i in 0 ..< m.count do write_raw(w, &m.commands[i], size_of(sim.Command))
 }
 
-decode_things :: proc(r: ^Reader) -> (m: Things_Relay, ok: bool) {
-	m.count = min(int(read_u8(r)), MAX_THINGS_PER_PACKET)
-	for i in 0 ..< m.count {
-		m.items[i].index = read_u8(r)
-		m.items[i].thing = read_thing(r)
-	}
+decode_input :: proc(r: ^Reader) -> (m: Input, ok: bool) {
+	m.view_tick = read_u32(r)
+	m.count = min(int(read_u8(r)), MAX_COMMANDS_PER_INPUT)
+	for i in 0 ..< m.count do read_raw(r, &m.commands[i], size_of(sim.Command))
 	return m, r.ok
 }
 
-// ---- the clock (server -> clients, unreliable, every tick) ----
+// ---- snapshots (server -> client, unreliable, every tick) ----
 
-Clock :: struct {
-	tick:  u32,
-	round: sim.Round, // state, scores, time left; the rest is the server's
+// The world as of `tick`: every active soldier, thing and bullet whole, the round, and
+// what happened that tick. `ack` is the receiver's last command the server applied;
+// `queue_depth` how many of its commands were waiting when the tick began, which
+// the client steers toward a small target by running its clock faster or slower.
+Snapshot :: struct {
+	tick:        u32,
+	ack:         u32,
+	queue_depth: u8,
+	round:       sim.Round,
+	soldiers:    [sim.MAX_PLAYERS]sim.Soldier,
+	things:      [sim.MAX_THINGS]sim.Thing,
+	bullets:     [sim.MAX_BULLETS]sim.Bullet,
+	events:      sim.Events,
 }
 
-encode_clock :: proc(w: ^Writer, m: ^Clock) {
-	write_u8(w, u8(Msg.Clock))
+encode_snapshot :: proc(w: ^Writer, m: ^Snapshot) {
+	write_u8(w, u8(Msg.Snapshot))
 	write_u32(w, m.tick)
-	write_u8(w, u8(m.round.state))
-	write_u32(w, u32(m.round.time_left))
-	write_u16(w, u16(m.round.scores[.Alpha]))
-	write_u16(w, u16(m.round.scores[.Bravo]))
+	write_u32(w, m.ack)
+	write_u8(w, m.queue_depth)
+	write_raw(w, &m.round, size_of(sim.Round))
+
+	count := 0
+	for &s in m.soldiers do if s.active do count += 1
+	write_u8(w, u8(count))
+	for &s, i in m.soldiers {
+		if !s.active do continue
+		write_u8(w, u8(i))
+		write_raw(w, &s, size_of(sim.Soldier))
+	}
+	count = 0
+	for &t in m.things do if t.style != .None do count += 1
+	write_u8(w, u8(count))
+	for &t, i in m.things {
+		if t.style == .None do continue
+		write_u8(w, u8(i))
+		write_raw(w, &t, size_of(sim.Thing))
+	}
+	count = 0
+	for &b in m.bullets do if b.active do count += 1
+	write_u16(w, u16(count))
+	for &b, i in m.bullets {
+		if !b.active do continue
+		write_u16(w, u16(i))
+		write_raw(w, &b, size_of(sim.Bullet))
+	}
+	write_u16(w, u16(m.events.count))
+	for i in 0 ..< m.events.count do write_raw(w, &m.events.items[i], size_of(sim.Event))
 }
 
-decode_clock :: proc(r: ^Reader) -> (m: Clock, ok: bool) {
+decode_snapshot :: proc(r: ^Reader, m: ^Snapshot) -> bool {
+	m^ = {}
 	m.tick = read_u32(r)
-	m.round.state = sim.Match_State(read_u8(r))
-	m.round.time_left = i32(read_u32(r))
-	m.round.scores[.Alpha] = i32(read_u16(r))
-	m.round.scores[.Bravo] = i32(read_u16(r))
-	return m, r.ok
-}
-
-// ---- a gun thrown (client -> server, reliable) ----
-
-Throw :: struct {
-	weapon: sim.Weapon_Id,
-	ammo:   i32,
-}
-
-encode_throw :: proc(w: ^Writer, m: ^Throw) {
-	write_u8(w, u8(Msg.Throw))
-	write_u8(w, u8(m.weapon))
-	write_u32(w, u32(m.ammo))
-}
-
-decode_throw :: proc(r: ^Reader) -> (m: Throw, ok: bool) {
-	m.weapon = sim.Weapon_Id(read_u8(r))
-	m.ammo = i32(read_u32(r))
-	return m, r.ok
+	m.ack = read_u32(r)
+	m.queue_depth = read_u8(r)
+	read_raw(r, &m.round, size_of(sim.Round))
+	soldiers := int(read_u8(r))
+	for _ in 0 ..< soldiers {
+		i := int(read_u8(r))
+		if i >= sim.MAX_PLAYERS do return false
+		read_raw(r, &m.soldiers[i], size_of(sim.Soldier))
+	}
+	things := int(read_u8(r))
+	for _ in 0 ..< things {
+		i := int(read_u8(r))
+		if i >= sim.MAX_THINGS do return false
+		read_raw(r, &m.things[i], size_of(sim.Thing))
+	}
+	bullets := int(read_u16(r))
+	for _ in 0 ..< bullets {
+		i := int(read_u16(r))
+		if i >= sim.MAX_BULLETS do return false
+		read_raw(r, &m.bullets[i], size_of(sim.Bullet))
+	}
+	m.events.count = min(int(read_u16(r)), sim.MAX_EVENTS)
+	for i in 0 ..< m.events.count do read_raw(r, &m.events.items[i], size_of(sim.Event))
+	return r.ok
 }

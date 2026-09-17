@@ -6,17 +6,16 @@
 //   - No allocation per tick: fixed-capacity arrays only.
 //   - Randomness comes from World.rng only.
 //   - Nothing in here wounds a soldier on its own. Bullets and blasts emit a Hit; the
-//     caller applies it through damage_apply (the client for its own shots, the
-//     server for bots' and for the claims it settles). Health changes in one place.
+//     server applies it through damage_apply. Health changes in one place.
 //   - Everything else that happened is emitted as an Event too (sounds, sparks,
-//     messages, and the pickups, deaths and scores the server relays as commits).
+//     messages, the pickups, deaths and scores).
 //
-// Who runs what (client authority, a relaying and refereeing server):
-//   - A client steps its own soldier (soldier_step), flies every bullet it knows of,
-//     runs the things on from what the server last sent of each (w.things_relayed:
-//     it makes none itself), and dead-reckons the others.
-//   - The server steps nobody's soldier (w.humans). It makes and moves the things,
-//     runs the round (round_tick) and settles claims (thing_grant, damage_apply).
+// Who runs what (server authority):
+//   - The server runs the one true world with step() on everyone's commands and
+//     applies the hits (damage_apply). What it sends is the world whole.
+//   - A client rebuilds its world from the newest snapshot every tick and replays its
+//     own pending commands on it (soldier_step, thing_claim, things_update,
+//     bullets_update), which predicts everything they touch. It applies no wounds.
 //   - Tools and tests run step() on a whole world, which does all of it at once.
 //
 // Files, one per object:
@@ -40,6 +39,10 @@ Button :: enum u8 {
 	Left, Right, Jump, Crouch, Prone, Jet, Fire, Throw, Reload, Change, Suicide, Drop, Flag_Throw,
 }
 Buttons :: bit_set[Button; u16]
+
+// Buttons that count once when pressed. A command reused for one that never arrived
+// drops them, so a press is never repeated.
+ONE_SHOT :: Buttons{.Throw, .Change, .Prone, .Drop, .Suicide, .Flag_Throw, .Reload}
 
 // One tick of input for one soldier. Numbered by the client that made it.
 Command :: struct {
@@ -72,9 +75,8 @@ World :: struct {
 	// Soldiers another process simulates (the clients' own, on the server): this world
 	// never steps them, and their bullets never touch soldiers here (their client
 	// reports the hits).
-	humans: bit_set[0 ..< MAX_PLAYERS],
 	ragdolls: [MAX_PLAYERS]Ragdoll, // the corpses, one per dead soldier
-	things_relayed: bool, // this world's things come from the server: thing_create makes none here
+	history:  ^History, // the server's rewind for judging shots; nil elsewhere
 }
 
 world_init :: proc(w: ^World, seed: u64) {
@@ -89,7 +91,7 @@ DEFAULT_GRAVITY :: 0.06
 step :: proc(ctx: ^Context, w: ^World, cmds: []Command, events: ^Events) {
 	events_clear(events)
 	for &s, i in w.soldiers {
-		if !s.active || i in w.humans do continue
+		if !s.active do continue
 		soldier_step(ctx, w, u8(i), cmds[i], events)
 	}
 	things_update(ctx, w, events)

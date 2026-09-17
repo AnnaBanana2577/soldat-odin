@@ -29,6 +29,7 @@ damage_apply :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 
 die :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 	s := &w.soldiers[hit.target]
+	vel := s.vel
 	ragdoll_start(ctx, w, hit.target) // before the velocity goes, so the corpse keeps it
 	ragdoll_tear(w, hit.target, s.health, hit.part)
 	if s.weapon.id != .Flamer do dropped_gun_from_death(ctx, w, hit.target, s, hit.push, events)
@@ -39,5 +40,5 @@ die :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 	s.deaths += 1
 	if hit.shooter != hit.target do w.soldiers[hit.shooter].kills += 1
 	else if s.kills > 0 do s.kills -= 1
-	emit(events, Kill{killer = hit.shooter, target = hit.target, weapon = hit.weapon, pos = s.pos, health = s.health, part = hit.part})
+	emit(events, Kill{killer = hit.shooter, target = hit.target, weapon = hit.weapon, pos = s.pos, vel = vel, health = s.health, part = hit.part})
 }

@@ -72,17 +72,13 @@ ragdoll_tear :: proc(w: ^World, index: u8, health: f32, part: u8) {
 	}
 }
 
-// One tick of every corpse. A dead soldier without a ragdoll gets one (its death may
-// have arrived as a state before the commit that tells how); a living one has none.
+// One tick of every corpse that has started (a kill starts it); a living soldier has
+// none.
 ragdolls_update :: proc(ctx: ^Context, w: ^World) {
 	for &s, i in w.soldiers {
 		r := &w.ragdolls[i]
-		if !s.active || !s.dead {
-			r.active = false
-			continue
-		}
-		if !r.active do ragdoll_start(ctx, w, u8(i))
-		ragdoll_step(ctx, w, u8(i))
+		if !s.active || !s.dead do r.active = false
+		if r.active do ragdoll_step(ctx, w, u8(i))
 	}
 }
 
