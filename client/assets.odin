@@ -22,7 +22,8 @@ Assets :: struct {
 	things_art:  Things_Art,
 }
 
-assets_load :: proc(a: ^Assets, base: string, map_name: string) -> bool {
+// Without `art` only what the sim needs is read: a bot has no window to draw on.
+assets_load :: proc(a: ^Assets, base: string, map_name: string, art: bool) -> bool {
 	ok: bool
 	a.level, ok = sim.level_load_file(base, map_name)
 	if !ok do return false
@@ -34,6 +35,7 @@ assets_load :: proc(a: ^Assets, base: string, map_name: string) -> bool {
 	a.ctx.anims = a.anims
 	a.ctx.skeletons = a.skeletons
 	sim.weapons_default(&a.ctx.weapons)
+	if !art do return true
 	a.map_texture = map_texture_load(base, a.level.texture)
 	a.scenery = scenery_load(base, a.level.scenery)
 	gostek_load(&a.gostek, base)

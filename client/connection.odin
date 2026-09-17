@@ -72,11 +72,13 @@ disconnect :: proc(c: ^Connection) {
 	for p in c.inbox do delete(p)
 	delete(c.inbox)
 	delete(c.map_name)
+	net.fake_destroy(&c.fake)
 	enet.deinitialize()
 }
 
 // Pumps ENet and returns everything that arrived, oldest first. The slice is valid
-// until the next call.
+// until the next call. With the fake line on, arrivals wait their delay here and the
+// packets held back from sending go out once theirs is up.
 conn_receive :: proc(c: ^Connection) -> [][]u8 {
 	for p in c.inbox do delete(p)
 	clear(&c.inbox)
@@ -86,16 +88,40 @@ conn_receive :: proc(c: ^Connection) -> [][]u8 {
 		case .RECEIVE:
 			data := make([]u8, event.packet.dataLength)
 			copy(data, event.packet.data[:event.packet.dataLength])
-			append(&c.inbox, data)
+			if !c.fake.on do append(&c.inbox, data)
+			else if !net.fake_hold(&c.fake, &c.fake.incoming, &c.fake.reliable_in, data, event.channelID == net.CHANNEL_RELIABLE) do delete(data)
 			enet.packet_destroy(event.packet)
 		case .DISCONNECT:
 			c.lost = true
+		}
+	}
+	if c.fake.on {
+		released: [dynamic]net.Held
+		defer delete(released)
+		net.fake_release(&c.fake.incoming, &released)
+		for h in released do append(&c.inbox, h.data)
+		clear(&released)
+		net.fake_release(&c.fake.outgoing, &released)
+		for h in released {
+			send_now(c, h.data, h.reliable)
+			delete(h.data)
 		}
 	}
 	return c.inbox[:]
 }
 
 conn_send :: proc(c: ^Connection, data: []u8, reliable: bool) {
+	if c.fake.on {
+		held := make([]u8, len(data))
+		copy(held, data)
+		if !net.fake_hold(&c.fake, &c.fake.outgoing, &c.fake.reliable_out, held, reliable) do delete(held)
+		return
+	}
+	send_now(c, data, reliable)
+}
+
+@(private = "file")
+send_now :: proc(c: ^Connection, data: []u8, reliable: bool) {
 	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNRELIABLE_FRAGMENT}
 	packet := enet.packet_create(raw_data(data), len(data), flags)
 	enet.peer_send(c.peer, reliable ? net.CHANNEL_RELIABLE : net.CHANNEL_UNRELIABLE, packet)

@@ -14,7 +14,7 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), math
 shared/net/  the wire: Writer/Reader, Msg, Hello/Welcome, Input, Snapshot, Fake_Link
-client/      main (init / game_loop / cleanup), input, game (reset / place others /
+client/      main (init / game_loop / cleanup), input, bot, game (reset / place others /
              replay / effects), interp (the snapshot ring and the render clock), render,
              audio, assets, connection, debug
 server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
@@ -53,6 +53,7 @@ odin run build.odin -file -- check          type-check every package (with the v
 odin run build.odin -file -- build          compile the client and the server into build/
 odin run build.odin -file -- test           run the package tests
 odin run build.odin -file -- dev            build, then a server with a client joined
+odin run build.odin -file -- dev -bots 2    the same with two bots in it
 odin run build.odin -file -- server         build, then the server alone
 ```
 
@@ -64,12 +65,17 @@ for another map). Anything after a second -- goes to the program:
 odin run build.odin -file -- dev -- -window          in a window instead of borderless fullscreen
 odin run build.odin -file -- dev -- -wire -zoom 0.3  the polygons as lines, the view closer
 odin run build.odin -file -- dev -- -hold right,fire -aim 200,0 -screenshot out.png
+odin run build.odin -file -- dev -bots 2 -- -ping 120 -jitter 30 -loss 5
 ```
 
 The last is a scripted run for checks without a person at the screen: it holds the
 buttons, aims at an offset from the soldier, writes the frame after two seconds and
 quits with a line of counts (-seconds N for a longer run). The debug options live in
-client/debug.odin and nowhere else.
+client/debug.odin and nowhere else. The last puts a simulated bad line between every
+client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
+in twenty lost (shared/net/fakelink.odin; reliable packets are never lost, only late).
+A bot is the client with -bot: no window, its input from client/bot.odin, so the
+server sees a player like any other.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires.
@@ -148,4 +154,8 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   the tick before; bullets whistle and whiz past us. Four reserved voices per soldier
   keep the loops alive and let a wind-up be cut. Corpse thuds, shell casings and the
   antics are not in yet.
+- Bots, for testing: the client with -bot has no window and takes its input from a
+  small brain (run at the nearest enemy, jet when it is above, jump when stuck, fire
+  with line of sight in range). A simulated bad line (-ping, -jitter, -loss) sits on
+  any client, bots included.
 - The HUD is still a stub.
