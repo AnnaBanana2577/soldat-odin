@@ -87,6 +87,7 @@ simulate :: proc(g: ^Game, in_: ^Input) {
 	snapshots_advance(&g.snaps)
 	place_others(g)
 	replay(g)
+	place_other_bullets(g)
 	sim.ragdolls_update(g.ctx, &g.world)
 	gather_effects(g)
 	g.smooth *= SMOOTH_DECAY
@@ -101,10 +102,11 @@ world_reset :: proc(w: ^sim.World, snap: ^net.Snapshot) {
 	w.bullets = snap.bullets
 }
 
-// Everyone but me, and their bullets, as they were at the render tick: blended between
-// the two snapshots around it, a tick's worth of motion behind for the frame blend.
-// Comes before the replay so what hangs from them (a carried flag) hangs from where
-// they are shown.
+// Everyone but me as they were at the render tick: blended between the two snapshots
+// around it, a tick's worth of motion behind for the frame blend. Comes before the
+// replay so what hangs from them (a carried flag) hangs from where they are shown.
+// Their bullets are cleared here and placed after the replay, so the replay steps
+// only mine and theirs are shown exactly where the snapshots had them.
 place_others :: proc(g: ^Game) {
 	a, b, t := snapshots_bracket(&g.snaps)
 	if a == nil do return
@@ -120,6 +122,13 @@ place_others :: proc(g: ^Game) {
 		w.soldiers[i].aim = sa.aim + (sb.aim - sa.aim) * t
 	}
 	for &bl in w.bullets do if bl.active && bl.owner != g.me do bl = {}
+}
+
+// The others' bullets at the render tick, into the slots mine do not hold.
+place_other_bullets :: proc(g: ^Game) {
+	a, b, t := snapshots_bracket(&g.snaps)
+	if a == nil do return
+	w := &g.world
 	for k in 0 ..< sim.MAX_BULLETS {
 		ba, bb := &a.bullets[k], &b.bullets[k]
 		if !ba.active || ba.owner == g.me || w.bullets[k].active do continue
