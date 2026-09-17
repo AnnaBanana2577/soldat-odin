@@ -159,3 +159,38 @@ read_string :: proc(r: ^Reader) -> string {
 	r.pos += n
 	return s
 }
+
+// ---- deltas: a struct as the 4-byte words that changed against a base ----
+
+// Whether two structs of `n` bytes differ anywhere.
+differs :: proc(a, b: rawptr, n: int) -> bool {
+	return mem.compare(([^]u8)(a)[:n], ([^]u8)(b)[:n]) != 0
+}
+
+// A mask of the words that changed, then those words. Structs up to 64 words.
+write_words :: proc(w: ^Writer, new, base: rawptr, n: int) {
+	words := n / 4
+	a, b := ([^]u32)(new), ([^]u32)(base)
+	mask: u64
+	for i in 0 ..< words do if a[i] != b[i] do mask |= 1 << u64(i)
+	write_u64(w, mask)
+	for i in 0 ..< words do if mask & (1 << u64(i)) != 0 do write_u32(w, a[i])
+}
+
+// Over `dst`, which holds the base already.
+read_words :: proc(r: ^Reader, dst: rawptr, n: int) {
+	words := n / 4
+	d := ([^]u32)(dst)
+	mask := read_u64(r)
+	for i in 0 ..< words do if mask & (1 << u64(i)) != 0 do d[i] = read_u32(r)
+}
+
+write_u64 :: proc(w: ^Writer, v: u64) {
+	write_u32(w, u32(v))
+	write_u32(w, u32(v >> 32))
+}
+
+read_u64 :: proc(r: ^Reader) -> u64 {
+	lo := u64(read_u32(r))
+	return lo | u64(read_u32(r)) << 32
+}

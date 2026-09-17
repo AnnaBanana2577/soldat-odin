@@ -123,9 +123,13 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   the client sends only its commands, numbered by itself, the last few in every
   packet so a lost one costs nothing. The server keeps a short queue per client,
   applies one command per tick (the last one again, without its one-shot buttons,
-  when none has arrived), steps the whole world, applies the hits, and sends every
-  client a snapshot: every soldier, thing and bullet whole, the round, the tick's
-  events, and for the receiver its last applied command and how many were waiting.
+  when none has arrived), steps the whole world, applies the hits, and every second
+  tick sends every client a snapshot: every soldier, thing and bullet, the round, the
+  events since the last one, and for the receiver its last applied command and how
+  many were waiting. A snapshot goes as a delta against the newest one the client
+  says it holds: only the entities that changed, and of those only the 4-byte words
+  that changed under a mask, so a quiet tick costs a hundred bytes; a client holding
+  nothing useful gets it whole.
   The client rebuilds its world from the newest snapshot every tick and replays its
   pending commands on it, which predicts everything they touch: its movement, its
   shots and their flight, its pickups, the things it holds. Everyone else and their
@@ -137,8 +141,12 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   putting the soldier elsewhere than predicted for the same command, is drawn as an
   offset that blends out. Each command says which tick the client shows the others
   at, and the server keeps the last second of soldiers so a shot meets them as its
-  shooter saw them, for as long as it flies. The state crosses the wire as the sim's
-  structs byte for byte; a portable, delta-compressed encoding is a later step.
+  shooter saw them, for as long as it flies (the server'"'"'s -no-rewind switches that off,
+  to show what it does; the run summary'"'"'s "hits seen" against "hits ruled" is the
+  measure). The state crosses the wire as the sim'"'"'s structs byte for byte, so the
+  same build must run on both ends; the hello carries the layout and a mismatch is
+  refused. A dead soldier'"'"'s state says how it died, so a corpse starts from any
+  snapshot and a lost one loses nothing.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg

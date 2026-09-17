@@ -30,6 +30,7 @@ Options :: struct {
 	base:     string,
 	map_name: string,
 	port:     u16,
+	no_rewind: bool, // judge shots against the present, to show what the rewind does
 }
 
 server: Server
@@ -45,6 +46,7 @@ init :: proc() {
 	o := &server.options
 	host_open(&server.host, o.port)
 	game_init(&server.game, o.base, o.map_name)
+	server.game.rewind = !o.no_rewind
 	server.last = time.tick_now()
 }
 
@@ -76,6 +78,7 @@ parse_options :: proc() -> (o: Options) {
 		case "-base": o.base = next; i += 1
 		case "-map":  o.map_name = next; i += 1
 		case "-port": o.port = u16(strconv.parse_int(next) or_else 23073); i += 1
+		case "-no-rewind": o.no_rewind = true
 		}
 	}
 	return

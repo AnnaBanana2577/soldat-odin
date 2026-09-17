@@ -46,7 +46,7 @@ Explosion :: struct { id: u16, player: u8, weapon: Weapon_Id, pos: Vec2, radius:
 Hit :: struct { shooter, target: u8, weapon: Weapon_Id, amount: f32, part: u8, pos, push: Vec2 }
 
 Damage :: struct { attacker, target: u8, weapon: Weapon_Id, amount: f32, vest: bool }
-Kill :: struct { killer, target: u8, weapon: Weapon_Id, pos, vel: Vec2, health: f32, part: u8 } // vel: the body's, for its corpse
+Kill :: struct { killer, target: u8, weapon: Weapon_Id, pos: Vec2, health: f32, part: u8 }
 Respawn :: struct { target: u8, pos: Vec2 }
 // The pickups carry the thing's index.
 Flag_Grab :: struct { player: u8, thing: u8, flag: Thing_Style, pos: Vec2 }

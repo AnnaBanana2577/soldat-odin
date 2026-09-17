@@ -20,6 +20,8 @@ Soldier :: struct {
 	health: f32,
 	dead:   bool,
 	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
+	death_vel:  Vec2, // how it died, for the corpse any client starts from this state
+	death_part: u8,
 	rng:      u64, // its own randomness (the spread of its shots), so its client predicts it
 
 	// owned by the client that plays it

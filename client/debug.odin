@@ -94,7 +94,7 @@ debug_frame :: proc(d: ^Debug, dt: f64) {
 		things := 0
 		for t in app.game.world.things do if t.style != .None do things += 1
 		me := &app.game.world.soldiers[app.game.me]
-		fmt.printfln("frame time over the second before: %.1f ms; tick %d, %d shots fired, %d things, %d kills, %d deaths, at %.0f,%.0f", d.frame_time / f64(max(d.frames, 1)) * 1000, app.game.world.tick, app.game.shots_fired, things, me.kills, me.deaths, me.pos.x, me.pos.y)
+		fmt.printfln("frame time over the second before: %.1f ms; tick %d, %d shots fired, %d hits seen, %d hits ruled, %d things, %d kills, %d deaths, at %.0f,%.0f", d.frame_time / f64(max(d.frames, 1)) * 1000, app.game.world.tick, app.game.shots_fired, app.game.hits_predicted, app.game.hits_confirmed, things, me.kills, me.deaths, me.pos.x, me.pos.y)
 		if d.screenshot != "" do rl.TakeScreenshot(strings.clone_to_cstring(d.screenshot, context.temp_allocator))
 		app.quit = true
 	}

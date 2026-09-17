@@ -37,15 +37,15 @@ Ragdoll :: struct {
 	torn:         Torn,
 }
 
-// The ragdoll of a soldier that just died, from its pose: where it is now, and a
-// velocity back, so the body keeps the soldier's motion (the velocity is on the wire,
-// the old position is not).
+// The ragdoll of a dead soldier, from its last pose: where it is, and the velocity it
+// died with back, so the body keeps the motion. Its state says how it died, so any
+// client can start the corpse from a snapshot alone.
 ragdoll_start :: proc(ctx: ^Context, w: ^World, index: u8) {
 	s := &w.soldiers[index]
 	r := &w.ragdolls[index]
 	r^ = {active = true}
 	now := soldier_pose(ctx.anims, s, s.pos)
-	before := soldier_pose(ctx.anims, s, s.pos - s.vel)
+	before := soldier_pose(ctx.anims, s, s.pos - s.death_vel)
 	for i in 0 ..< POSE_POINTS do r.pos[i], r.old_pos[i] = now[i], before[i]
 	// the four extra points the original parks on the neck and head; constrained only
 	// to each other, they ride along unseen
@@ -72,13 +72,20 @@ ragdoll_tear :: proc(w: ^World, index: u8, health: f32, part: u8) {
 	}
 }
 
-// One tick of every corpse that has started (a kill starts it); a living soldier has
-// none.
+// One tick of every corpse. A dead soldier without one gets one from its state; a
+// living soldier has none.
 ragdolls_update :: proc(ctx: ^Context, w: ^World) {
 	for &s, i in w.soldiers {
 		r := &w.ragdolls[i]
-		if !s.active || !s.dead do r.active = false
-		if r.active do ragdoll_step(ctx, w, u8(i))
+		if !s.active || !s.dead {
+			r.active = false
+			continue
+		}
+		if !r.active {
+			ragdoll_start(ctx, w, u8(i))
+			ragdoll_tear(w, u8(i), s.health, s.death_part)
+		}
+		ragdoll_step(ctx, w, u8(i))
 	}
 }
 

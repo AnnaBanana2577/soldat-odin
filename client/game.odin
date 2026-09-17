@@ -24,6 +24,7 @@ Game :: struct {
 	time_scale: f64,        // my tick rate against the server's, steering the queue depth
 	camera:     Camera,
 	shots_fired: int,      // ours, for the HUD
+	hits_predicted, hits_confirmed: int, // my hits as I saw them, and as the server ruled
 	my_prev:    sim.Vec2,  // my position a tick ago, for drawing between ticks
 
 	// a correction: the server put my soldier elsewhere than I predicted for the same
@@ -110,6 +111,7 @@ world_reset :: proc(w: ^sim.World, snap: ^net.Snapshot) {
 place_others :: proc(g: ^Game) {
 	a, b, t := snapshots_bracket(&g.snaps)
 	if a == nil do return
+	span := f32(max(b.tick - a.tick, 1)) // ticks between the two, for a tick's worth of motion
 	w := &g.world
 	for i in 0 ..< sim.MAX_PLAYERS {
 		if u8(i) == g.me do continue
@@ -118,7 +120,7 @@ place_others :: proc(g: ^Game) {
 		if !sa.active || sa.dead || !sb.active do continue
 		step := sb.pos - sa.pos
 		w.soldiers[i].pos = sa.pos + step * t
-		w.soldiers[i].old_pos = w.soldiers[i].pos - step
+		w.soldiers[i].old_pos = w.soldiers[i].pos - step / span
 		w.soldiers[i].aim = sa.aim + (sb.aim - sa.aim) * t
 	}
 	for &bl in w.bullets do if bl.active && bl.owner != g.me do bl = {}
@@ -128,6 +130,7 @@ place_others :: proc(g: ^Game) {
 place_other_bullets :: proc(g: ^Game) {
 	a, b, t := snapshots_bracket(&g.snaps)
 	if a == nil do return
+	span := f32(max(b.tick - a.tick, 1))
 	w := &g.world
 	for k in 0 ..< sim.MAX_BULLETS {
 		ba, bb := &a.bullets[k], &b.bullets[k]
@@ -136,7 +139,7 @@ place_other_bullets :: proc(g: ^Game) {
 		if bb.active && bb.owner == ba.owner {
 			step := bb.pos - ba.pos
 			w.bullets[k].pos = ba.pos + step * t
-			w.bullets[k].old_pos = w.bullets[k].pos - step
+			w.bullets[k].old_pos = w.bullets[k].pos - step / span
 		}
 	}
 }
@@ -160,7 +163,7 @@ replay :: proc(g: ^Game) {
 
 // This tick's effects for the sparks and sounds: from the frontier, what my own
 // actions caused, which I predicted; from the snapshots the render clock passed, what
-// the server reported, except what I predicted already. A kill starts the corpse.
+// the server reported, except what I predicted already.
 gather_effects :: proc(g: ^Game) {
 	sim.events_clear(&g.events)
 	for e in sim.events_slice(&g.frontier) {
@@ -173,17 +176,14 @@ gather_effects :: proc(g: ^Game) {
 			sim.emit(&g.events, e)
 		}
 	}
+	// the counts the debug summary shows: what I predicted against what the server ruled
+	for e in sim.events_slice(&g.frontier) {
+		if v, is_hit := e.(sim.Hit); is_hit && v.shooter == g.me && v.target != g.me do g.hits_predicted += 1
+	}
 	for e in sim.events_slice(&g.events) {
 		#partial switch v in e {
-		case sim.Fire:
-			if v.player == g.me do g.shots_fired += 1
-		case sim.Kill:
-			s := &g.world.soldiers[v.target]
-			if s.active && s.dead && !g.world.ragdolls[v.target].active {
-				s.vel = v.vel
-				sim.ragdoll_start(g.ctx, &g.world, v.target)
-				sim.ragdoll_tear(&g.world, v.target, v.health, v.part)
-			}
+		case sim.Fire:   if v.player == g.me do g.shots_fired += 1
+		case sim.Damage: if v.attacker == g.me && v.target != g.me do g.hits_confirmed += 1
 		}
 	}
 }
@@ -191,7 +191,7 @@ gather_effects :: proc(g: ^Game) {
 // My newest commands, a few packets running so a lost one loses nothing, and the tick
 // I show the others at.
 send_to_server :: proc(g: ^Game, conn: ^Connection) {
-	m := net.Input{view_tick = u32(g.snaps.render_tick)}
+	m := net.Input{view_tick = u32(g.snaps.render_tick), have = g.snaps.any ? g.snaps.latest : 0}
 	first := max(len(g.pending) - net.MAX_COMMANDS_PER_INPUT, 0)
 	for cmd in g.pending[first:] {
 		m.commands[m.count] = cmd

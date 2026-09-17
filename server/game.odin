@@ -19,9 +19,13 @@ Game :: struct {
 	map_name:  string,
 	clients:   [sim.MAX_PLAYERS]Client,
 	history:   sim.History,   // the last second of soldiers, for judging shots as their shooters saw
-	snapshot:  net.Snapshot,  // this tick's, filled once and sent to each client with its own ack
+	rewind:    bool,          // judge shots against that history (off only to show what it does)
+	snapshot:  net.Snapshot,  // the next one, its events gathering until it goes
+	sent:      ^[SENT_RING]net.Snapshot, // as sent, by tick, the bases of the deltas
 	writer:    net.Writer,
 }
+
+SENT_RING :: 64 // snapshots kept as delta bases: a second of them
 
 // A client's commands wait here in order until their tick comes. Steady play keeps a
 // couple queued; the snapshot tells the client how many, and it runs its clock a
@@ -33,6 +37,7 @@ Client :: struct {
 	ack:       u32,                  // the seq of `last`
 	depth:     u8,                   // how many were waiting when this tick began
 	view_tick: u32,                  // the tick the client shows the others at
+	have:      u32,                  // the newest snapshot it holds, the base of its next delta
 }
 
 MAX_QUEUE :: 30 // commands a client may have waiting; older ones beyond this are dropped
@@ -48,6 +53,8 @@ game_init :: proc(g: ^Game, base, map_name: string) {
 	sim.weapons_default(&g.ctx.weapons)
 	sim.world_init(&g.world, 1)
 	g.world.history = &g.history
+	g.rewind = true
+	g.sent = new([SENT_RING]net.Snapshot)
 	sim.round_init(&g.world.round)
 	sim.things_spawn(&g.ctx, &g.world)
 }
@@ -75,6 +82,7 @@ receive_client_messages :: proc(g: ^Game, host: ^Host) {
 // one carries them again.
 enqueue :: proc(c: ^Client, m: ^net.Input) {
 	c.view_tick = m.view_tick
+	c.have = m.have
 	for cmd in m.commands[:m.count] {
 		if cmd.seq <= c.ack do continue
 		at := len(c.queue)
@@ -95,9 +103,9 @@ enqueue :: proc(c: ^Client, m: ^net.Input) {
 
 // A newcomer: a slot, a soldier on the smaller team's spawn, and the welcome.
 join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
-	if m.version != net.VERSION {
+	if m.version != net.VERSION || m.layout != net.LAYOUT {
 		w: net.Writer
-		net.encode_denied(&w, "wrong version")
+		net.encode_denied(&w, m.version != net.VERSION ? "wrong version" : "different build")
 		peer_send(peer, net.writer_bytes(&w), reliable = true)
 		return
 	}
@@ -147,7 +155,7 @@ tick :: proc(g: ^Game) {
 			c.last.buttons -= sim.ONE_SHOT // a press counts once, however long the gap
 		}
 		cmds[i] = c.last
-		behind := g.world.tick > c.view_tick ? g.world.tick - c.view_tick : 0
+		behind := g.rewind && g.world.tick > c.view_tick ? g.world.tick - c.view_tick : 0
 		g.world.soldiers[i].view_lag = u8(min(behind, sim.HISTORY_TICKS - 1))
 	}
 	sim.step(&g.ctx, &g.world, cmds[:], &g.events)
@@ -157,24 +165,30 @@ tick :: proc(g: ^Game) {
 	for i in 0 ..< reported {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, &g.world, hit, &g.events)
 	}
+	for e in sim.events_slice(&g.events) do sim.emit(&g.snapshot.events, e) // for the next snapshot
 }
 
-// The world as it stands to every client, each with its own ack and queue depth.
+// Every SNAPSHOT_EVERY ticks, the world as it stands to every client, each with its
+// own ack and queue depth, as a delta against the newest snapshot it says it holds.
 send_snapshots :: proc(g: ^Game, host: ^Host) {
+	if g.world.tick % net.SNAPSHOT_EVERY != 0 do return
 	snap := &g.snapshot
 	snap.tick = g.world.tick
 	snap.round = g.world.round
 	snap.soldiers = g.world.soldiers
 	snap.things = g.world.things
 	snap.bullets = g.world.bullets
-	snap.events = g.events
+	g.sent[snap.tick % SENT_RING] = snap^
+	defer sim.events_clear(&snap.events)
 	for &c, i in g.clients {
 		if !c.connected do continue
 		snap.ack = c.ack
 		snap.queue_depth = c.depth
+		base: ^net.Snapshot
+		if c.have != 0 && c.have < snap.tick && c.have + SENT_RING > snap.tick && g.sent[c.have % SENT_RING].tick == c.have do base = &g.sent[c.have % SENT_RING]
 		g.writer.len = 0
 		g.writer.overflow = false
-		net.encode_snapshot(&g.writer, snap)
+		net.encode_snapshot(&g.writer, snap, base)
 		if g.writer.overflow {
 			fmt.eprintln("snapshot too large to send")
 			return
