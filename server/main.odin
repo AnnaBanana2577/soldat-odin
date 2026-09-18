@@ -2,10 +2,11 @@
 //
 //   init
 //   while running:
-//     receive client messages
-//     tick accumulator:
-//       tick (one command per client, the world stepped, the hits applied)
-//       send snapshots
+//     for each tick owed (game.odin):
+//       step_soldiers  every soldier one tick on: the bots played, the players guessed
+//       receive        the clients' word over the guesses, and their shots
+//       step_world     the things, the bullets, the round; the hits become wounds
+//       send           what changed, what was decided, the soldiers and the bullets born
 //     sleep until the next tick
 //   cleanup
 package server
@@ -14,6 +15,7 @@ import "core:os"
 import "core:strconv"
 import "core:time"
 import "../shared/sim"
+import "../shared/timer"
 
 TICK :: sim.TICK
 
@@ -45,6 +47,7 @@ main :: proc() {
 
 init :: proc() {
 	server.options = parse_options()
+	timer.fine_sleep_begin() // the loop sleeps between ticks
 	o := &server.options
 	host_open(&server.host, o.port)
 	game_init(&server.game, o.base, o.map_name, u32(o.max_rewind_ms * sim.TICK_RATE / 1000))
@@ -53,19 +56,18 @@ init :: proc() {
 }
 
 server_loop :: proc() {
-	receive_client_messages(&server.game, &server.host)
 	now := time.tick_now()
 	server.accumulator += time.duration_seconds(time.tick_diff(server.last, now))
 	server.last = now
 	for server.accumulator >= TICK {
-		tick(&server.game)
-		send_snapshots(&server.game, &server.host)
+		tick(&server.game, &server.host)
 		server.accumulator -= TICK
 	}
 	time.sleep(time.Millisecond)
 }
 
 cleanup :: proc() {
+	timer.fine_sleep_end()
 	host_close(&server.host)
 }
 
@@ -73,7 +75,7 @@ parse_options :: proc() -> (o: Options) {
 	o.base = "../opensoldat-base/shared"
 	o.map_name = "ctf_Ash"
 	o.port = 23073
-	o.max_rewind_ms = 150
+	o.max_rewind_ms = 300
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		next := i + 1 < len(args) ? args[i + 1] : ""
@@ -81,7 +83,7 @@ parse_options :: proc() -> (o: Options) {
 		case "-base": o.base = next; i += 1
 		case "-map":  o.map_name = next; i += 1
 		case "-port": o.port = u16(strconv.parse_int(next) or_else 23073); i += 1
-		case "-max-rewind": o.max_rewind_ms = strconv.parse_int(next) or_else 150; i += 1
+		case "-max-rewind": o.max_rewind_ms = strconv.parse_int(next) or_else 300; i += 1
 		case "-bots":  o.bots = strconv.parse_int(next) or_else 0; i += 1
 		case "-dodge": o.dodge = true
 		}

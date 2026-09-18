@@ -67,7 +67,7 @@ host_receive :: proc(h: ^Host) -> []Received {
 host_bind :: proc(h: ^Host, slot: u8, peer: ^enet.Peer) {
 	h.peers[slot] = peer
 	// ENet drops unreliable packets when it thinks the line is congested, and is
-	// easily fooled; a lost snapshot only makes the client wait for the next. Never.
+	// easily fooled; a lost update only makes the client wait for the next. Never.
 	enet.peer_throttle_configure(peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
 	peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
 }
@@ -84,6 +84,12 @@ host_send :: proc(h: ^Host, slot: u8, data: []u8, reliable: bool) {
 
 host_broadcast :: proc(h: ^Host, data: []u8, reliable: bool) {
 	for p in h.peers do if p != nil do peer_send(p, data, reliable)
+}
+
+// ENet only queues what it is given and sends it the next time it is pumped, which is
+// a tick away: what this tick queued goes now.
+host_flush :: proc(h: ^Host) {
+	enet.host_flush(h.host)
 }
 
 peer_send :: proc(peer: ^enet.Peer, data: []u8, reliable: bool) {

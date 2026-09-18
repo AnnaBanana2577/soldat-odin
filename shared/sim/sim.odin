@@ -4,20 +4,27 @@
 //   - No I/O, no rendering, no audio, no globals. Everything a step needs is in
 //     Context (static data) and World (state).
 //   - No allocation per tick: fixed-capacity arrays only.
-//   - Randomness comes from World.rng only.
+//   - Randomness comes from World.rng, from a soldier's own rng for what its player
+//     rolls (the spread of a shot), and from a bullet's own numbers for what happens
+//     to it in flight, so a bullet flies the same on every machine.
 //   - Nothing in here wounds a soldier on its own. Bullets and blasts emit a Hit; the
 //     server applies it through damage_apply. Health changes in one place.
 //   - Everything else that happened is emitted as an Event too (sounds, sparks,
 //     messages, the pickups, deaths and scores).
 //
-// Who runs what (server authority):
-//   - The server runs the one true world with step() on everyone's commands and
-//     applies the hits (damage_apply). What it sends is the world whole.
-//   - A client rebuilds its world from the newest snapshot every tick, replays its
-//     own pending commands on it (soldier_step, things_update, bullets_update),
-//     which predicts everything they touch, and overwrites everything that is not
-//     its own from the snapshots as it shows them. It applies no wounds.
-//   - Tools and tests run step() on a whole world, which does all of it at once.
+// Who runs what. Every machine runs this same simulation on its own world, and one
+// flag on the world, authority, marks the server's: the one that decides.
+//   - A soldier's player steps it (soldier_step): a client its own, the server its
+//     bots. Every machine guesses everyone else on from what it last heard
+//     (soldier_reckon), the server too, until their player's word replaces the guess.
+//   - Every machine flies every bullet and moves every thing, so the blood, the sparks
+//     and the sounds are local everywhere.
+//   - Only with authority do hits become wounds (damage_apply), are things made, taken,
+//     returned and scored, do the dead respawn, and does the map's own harm count
+//     (soldier_served_tick, round_tick). A bullet there meets the soldiers as its
+//     shooter saw them (history).
+//   - Tools and tests run step() on a whole world with authority, which does all of it
+//     at once.
 //
 // Files, one per object:
 //   soldier, movement, soldier_anim, combat, antics, soldier_collision
@@ -41,13 +48,11 @@ Button :: enum u8 {
 }
 Buttons :: bit_set[Button; u16]
 
-// Buttons that count once when pressed. A command reused for one that never arrived
-// drops them, so a press is never repeated.
+// Buttons that count once when pressed, however long they are held.
 ONE_SHOT :: Buttons{.Throw, .Change, .Prone, .Drop, .Suicide, .Flag_Throw, .Reload}
 
-// One tick of input for one soldier. Numbered by the client that made it.
+// One tick of input for one soldier.
 Command :: struct {
-	seq:     u32,
 	buttons: Buttons,
 	aim:     Vec2, // world-space cursor
 }
@@ -73,11 +78,13 @@ World :: struct {
 	round:    Round,
 	flag_home: [2]Vec2, // where the alpha and bravo flags spawn and return to
 
-	// Soldiers another process simulates (the clients' own, on the server): this world
-	// never steps them, and their bullets never touch soldiers here (their client
-	// reports the hits).
 	ragdolls: [MAX_PLAYERS]Ragdoll, // the corpses, one per dead soldier
 	history:  ^History, // the server's rewind for judging shots; nil elsewhere
+
+	// This world decides: things are made, taken, returned and scored here, and the dead
+	// respawn. Elsewhere (a client's world) things only move, and what was decided
+	// arrives as facts.
+	authority: bool,
 }
 
 world_init :: proc(w: ^World, seed: u64) {

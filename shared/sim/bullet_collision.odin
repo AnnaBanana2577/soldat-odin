@@ -150,13 +150,16 @@ ricochet :: proc(level: ^Level, w: ^World, b: ^Bullet, index: u16, poly: ^Polygo
 	return true
 }
 
+// The fragments scatter by the grenade's own numbers, not the world's dice, so every
+// machine that flew it to the same spot rolls the same five.
 @(private = "file")
 cluster_split :: proc(ctx: ^Context, w: ^World, b: ^Bullet, events: ^Events) {
 	origin := b.pos - b.vel
+	rng := u64(transmute(u32)b.pos.x) << 32 | u64(transmute(u32)b.pos.y) | 1
 	for _ in 0 ..< 5 {
 		v := b.vel * -0.75
-		v.x = -v.x - 2.5 + rand_f32(&w.rng) * 5
-		v.y = v.y - 2.5 + rand_f32(&w.rng) * 2.5
+		v.x = -v.x - 2.5 + rand_f32(&rng) * 5
+		v.y = v.y - 2.5 + rand_f32(&rng) * 2.5
 		bullet_spawn(ctx, w, origin, v, .Cluster, b.owner, ctx.weapons[.Frag].damage / 2, events)
 	}
 }

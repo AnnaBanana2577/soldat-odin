@@ -1,10 +1,25 @@
 # soldat-odin skeleton
 
-The shape of an Odin port on raylib and ENet. The server is authoritative: clients
-send their commands, the server runs the one true world and sends it whole every
-second tick; a client predicts what its own commands touch by replaying them on the
-newest snapshot, and shows everything else blended between two older snapshots; the
-server judges shots against the soldiers as their shooter saw them, up to a cap.
+The shape of an Odin port on raylib and ENet, and its netcode, which is five rules:
+
+1. **My soldier is mine.** My client steps it on my keys and tells the server where it
+   is. It is never predicted and never corrected, so it never rubber-bands; the server
+   only refuses a move no soldier could make.
+2. **What matters to anyone else is the server's.** Whether a bullet hit, health,
+   deaths, respawns, things, pickups, flags, scores. Every machine runs the same
+   simulation and one flag on the world, authority, marks the one whose word counts.
+3. **A bullet crosses the wire once, at birth,** and flies on every machine from
+   there, so the blood, the sparks and the sounds are local and at once.
+4. **Everyone sees the others a little in the past, and the bullets are moved to
+   match.** The server judges a bullet against the soldiers as its shooter saw them
+   (it rewinds), so what you aim at is what you hit. The other clients fly that bullet
+   forward by the shooter's lag plus their own, so the bullet you see coming is the
+   one that will be ruled on, and you can dodge it.
+5. **State is sent over and over, unreliably; news is sent once, reliably.** Where a
+   soldier is goes in every packet and the next one replaces it. A death, a respawn,
+   a pickup, a score, a thing that changed goes once and is never lost.
+
+How that comes to be built is under "What works", Online.
 
 ```
 shared/sim/  the simulation, shared, one file per object: level (the map: loading,
@@ -12,19 +27,20 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              antics, soldier_collision), bullet (bullet_collision, explosion), damage
              (the one place health changes), thing (flag, kit, dropped_gun, parachute,
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
-             union), math
-shared/net/  the wire: Writer/Reader, Msg, Hello/Welcome, Input, Snapshot, Fake_Link
+             union), bot (the brain of the server's bots and of the test client), math
+shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
+             Welcome, Input, Act, Update, Things, Facts, Correction), Fake_Link
+shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), debug, and a package
              per subsystem:
   connection/  the link to the server, the simulated bad line
-  game/        the world: game (reset / replay / overlay / effects), snapshots (the
-               ring and the render clock)
+  game/        the world: game (the tick: receive / step / send), view (the others:
+               the view tick, the guessing on, the blending of corrections)
   input/       input (the keys and mouse), script (the headless client's)
   render/      render (the frame, the map's meshes), camera, textures, gostek,
                bullet_art, things_art, sparks, sprite
   audio/       audio
-server/      main (init / server_loop / cleanup), game (tick / send_snapshots), bots,
-             connection
+server/      main (init / server_loop / cleanup), game (the tick), connection
 ```
 
 The client, client/main.odin:
@@ -34,24 +50,28 @@ open window, connection, game, render, audio
 until the window closes:
   sample input                  the keys and the cursor in the world
   for each tick owed:
-    game.receive                the server's snapshots
-    game.simulate               the world: newest snapshot, my replay, the rest shown late
+    game.tick                   (client/game/game.odin)
+      view_advance                everyone else one tick on, as guessed
+      receive                     the server's word over the guesses; the others' bullets
+      step_mine                   my soldier on this tick's keys
+      step_world                  the corpses, the things, every bullet
+      send                        my soldier, the tick I show the others at, my shots
     render.tick, audio.tick     the sparks and sounds of it
-    game.send                   my commands
   render.camera_follow, render.draw
 close audio, render, game, connection, window
 ```
 
 A headless client (-headless) runs the same without the window, the picture and the
-sound (run_headless), its input scripted: a player for testing the netcode.
+sound (run_headless), played by the bots' brain: a player for testing the netcode.
 
-The server loop, server/main.odin:
+The server's tick, server/game.odin, reads the same way:
 
 ```
-receive_client_messages
-tick accumulator:
-  tick            one command per client, the world stepped, the hits applied
-  send_snapshots
+for each tick owed:
+  step_soldiers   every soldier one tick on: the bots played, the players guessed
+  receive         the clients' word over the guesses; their shots, checked
+  step_world      the things, every bullet, the round; the hits become wounds
+  send            what changed, what was decided, the soldiers and the bullets born
 sleep until the next tick
 ```
 
@@ -80,10 +100,10 @@ odin run build.odin -file -- dev -- -hold right,fire -aim 200,0 -screenshot out.
 odin run build.odin -file -- dev -bots 2 -- -ping 120 -jitter 30 -loss 5
 ```
 
-The last is a scripted run for checks without a person at the screen: it holds the
+The third is a scripted run for checks without a person at the screen: it holds the
 buttons, aims at an offset from the soldier, writes the frame after two seconds and
 quits with a line of counts (-seconds N for a longer run). The debug options live in
-client/debug.odin and nowhere else. The last puts a simulated bad line between every
+client/debug.odin and nowhere else. The last puts a simulated bad line between that
 client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
 in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
 trip and a half later, and those behind it wait). The bots are the server's own
@@ -130,54 +150,60 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   second, and are gone after twenty. A gun let go of by a death drops where the
   soldier fell rather than carrying the body's speed as the original has it, which
   sent a jetting soldier's gun sailing away. Whoever stands by a free thing and may
-  have it takes it, in the things' own update.
-- Online, server authority. The client says hello with its name, the server answers
-  with a slot and the map and spawns the soldier on the emptier team. From then on
-  the client sends only its commands, numbered by itself, the last few in every
-  packet so a lost one costs nothing. The server keeps a short queue per client,
-  applies one command per tick (the last one again, without its one-shot buttons,
-  when none has arrived), steps the whole world, applies the hits, and every second
-  tick sends every client a snapshot: every soldier, thing and bullet, the round,
-  the actions since the last one, and for the receiver its last applied command, how
-  many were waiting, and its facts. A snapshot goes as a delta against the newest
-  one the client says it holds: only the entities that changed, and of those only
-  the 4-byte words that changed under a mask, so a quiet tick costs a hundred bytes;
-  a client holding nothing useful gets it whole.
-  - What happened comes two ways. The players' actions (a shot, a wall hit, blood)
-    are told once, in the snapshot of their tick: a lost one loses a spark. What only
-    the server decides (a wound, a kill, a respawn, a pickup, a score) is a fact,
-    numbered per client and carried in every snapshot until one that carried it is
-    acknowledged, so none is ever lost. sim.event_owner tells the two apart, and the
-    same test tells the client which effects to take from its own prediction.
-  - The client rebuilds its world every tick by one rule (client/game/game.odin): the
-    world is the newest snapshot; its pending commands are replayed on it, stepping
-    the whole world, which predicts everything they touch (its movement, its shots
-    and their flight, its pickups, the things it holds or let go of); then everything
-    that is not its own is overwritten with the world as shown, blended between the
-    two snapshots around a render tick a few ticks behind the newest. What is its own
-    is one test, `mine`: its soldier, its bullets, the things it holds or let go of.
-    Everything else is the server's word, never guessed and never corrected; a
-    correction of its own soldier (the server put it elsewhere than predicted for the
-    same command) is drawn as an offset that blends out.
-  - The client runs its clock a little faster or slower to hold the server's queue
-    at a small target, and the render tick likewise to hold its distance behind the
-    newest snapshot, so the two never need to agree on a clock. That distance follows
-    the jitter: each newest snapshot should arrive at least three ticks ahead of the
-    render tick (the earliest of the last two seconds sets it), so there is always one
-    past it to blend toward; -interp-ticks N fixes it, to compare.
-  - Each command says which tick the client shows the others at, and the server keeps
-    the last second of soldiers so a shot meets them as its shooter saw them, for as
-    long as it flies, up to a cap (-max-rewind MS, 150 by default): inside it every
-    shot lands where it was aimed; a shooter further behind leads by the rest, and
-    nobody is hit where it stood longer ago than the cap. A thrower stands where it is
-    now, not rewound, so it does not stand in its own blast on the server alone. The
-    server's leave line says how far back a client's shots were judged on average, and
-    how often the cap applied. The run summary's "hits seen" against "hits ruled" is
-    the measure of the rewind.
-  - The state crosses the wire as the sim's structs byte for byte, so the same build
-    must run on both ends; the hello carries the layout and a mismatch is refused. A
-    dead soldier's state says how it died, so a corpse starts from any snapshot and a
-    lost one loses nothing.
+  have it takes it, in the things' own update, where the world has authority.
+- Online. The five rules at the top, as built:
+  - A client steps its own soldier and sends it every tick (Input): the half of the
+    soldier that is its to say (where it is, its keys and aim, its animation, its
+    weapons), the server tick it is showing the others at, and its recent shots, each
+    riding in three packets so a lost one loses no shot. What the server must not miss
+    goes once, reliably (Act): a thrown gun, a thrown flag, a suicide.
+  - The server steps every soldier every tick: its bots on their brain's command, and
+    the players as a guess from their last keys (soldier_reckon), the same guess every
+    client makes of them. Then each client's word replaces the guess. Because its
+    world has authority, what those steps cause counts: a wound from lava, a fall off
+    the map. It checks each shot before it flies (a weapon the soldier holds, a token
+    bucket on the fire rate, the muzzle near the soldier, no faster than the weapon
+    shoots, not under cease fire) and refuses a soldier that moved further than one
+    can, putting it back (Correction).
+  - Every other tick each client gets an Update: which slots are in play, the soldiers
+    in its view (its own with only the server's half: health, death, the flag, the
+    tally), the ones out of view twice a second, and the bullets born lately whose line
+    of flight passes near it, each in three updates running and numbered so it flies
+    once. A thing goes out whole when it appears or goes, changes hands, or starts or
+    stops moving (Things); in between every machine runs the same physics on it. What
+    only the server could decide goes out as a fact (Facts), and sounds and shows like
+    anything else that happened; what a pickup gives of the things a client owns (a
+    gun, grenades) the client gives itself on hearing of it.
+  - Time. A client shows the others at a view tick: the newest update's, moved on a
+    tick per tick, each soldier guessed on when its word is late and blended to the
+    truth when it comes (client/game/view.odin). Every Input names that tick, and the
+    difference from the tick it arrives in is the client's lag, measured per packet. A
+    bullet keeps the lag of the packet it came in and meets the soldiers as they were
+    that long ago (sim/history.odin), for as long as it flies, up to a cap (-max-rewind
+    MS, 300 by default; past it a shooter leads). The others fly that bullet on by the
+    ticks since its birth, its shooter's lag and their own: the server will rule it
+    against me as I was my own lag ago, so the bullet that will be ruled to hit me is
+    that far ahead of the one the server spawned. Soldat's rule: my ping plus the
+    shooter's. The shove of a hit on me is felt here, from my own copy of the bullet,
+    the moment I see it land; the wound is the server's.
+  - Lives. The server places a soldier (a spawn, a respawn, a correction) and each
+    placing begins a new life, numbered. A client says which life its word is of and
+    takes the server's word of its own soldier only for the life it is living, so word
+    from before a placing is never taken for word from after it, whichever way the
+    packets cross.
+  - Every message is state or news, and RELIABLE in shared/net/protocol.odin says
+    which; no call site chooses. Each has one serialize procedure, used for reading
+    and writing both, bounds-checked, that refuses floats that are not numbers, enums
+    out of range, counts too large and bytes left over (shared/net/protocol_test.odin).
+  - ENet only sends what it was given when it is next pumped, a tick later; both ends
+    flush at the end of their tick, which took two ticks off everyone's lag.
+  - Measured with the headless client against six dodging bots on Arena, 75 seconds a
+    run. On a clean line the hits it saw itself give and the hits the server ruled were
+    the same (25 of 25 and 13 of 13 in two runs), judged 17 ms back. On a simulated
+    120 ms line with 30 ms of jitter and 5% loss, 12 of the 14 it saw were ruled (13 of
+    15 in another run), judged 164 ms back. At 200 ms with 10% loss, 12 of 12 given
+    and 16 of 16 taken, judged 249 ms back. 4.8 KB/s up and 19.5 KB/s down with seven
+    soldiers in view.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg
@@ -193,14 +219,15 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   the tick before; bullets whistle and whiz past us. Four reserved voices per soldier
   keep the loops alive and let a wind-up be cut. Corpse thuds, shell casings and the
   antics are not in yet.
-- Bots: the server plays them itself (server/bots.odin), with no client and no
-  connection: each tick a small brain reads the server's world and gives the bot's
+- Bots: the server plays them itself, with no client and no connection: each tick a
+  small brain (shared/sim/bot.odin) reads the server's world and gives the bot's
   command (run at the nearest enemy, jet when it is above, jump when stuck, fire with
   line of sight in range). The server's -bots N adds them, -dodge makes them dodge.
-- Tests without a person: the client's -headless has no window and scripted input
-  (random keys every quarter to three quarters of a second, aimed at the nearest
-  enemy), and with -seconds N it quits with a summary: what it saw and what the
-  server ruled of its hits, and how far behind it showed the world. A simulated bad
-  line (-ping, -jitter, -loss) sits on any client. The server's leave line says how
-  far back each client's shots were judged.
+- Tests without a person: the client's -headless has no window and is played by the
+  bots' brain, through a real connection, and with -seconds N it quits with a summary:
+  the hits it saw itself give and take, how far behind it showed the world, and what
+  went over the wire. The server's leave line says how many of those hits it ruled,
+  and how far back that client's shots were judged: the two agreeing is the measure
+  of the netcode. A simulated bad line (-ping, -jitter, -loss) sits on any client.
+  The test command runs the wire format's tests.
 - The HUD is still a stub.

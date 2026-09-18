@@ -22,7 +22,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 	thing_check_holder(w, t)
 	if t.holder > 0 {
 		holder := &w.soldiers[t.holder - 1]
-		if .Flag_Throw in holder.controls do flag_throw(ctx, w, t, holder)
+		if w.authority && .Flag_Throw in holder.controls do flag_throw(ctx, w, t, holder)
 	}
 	if !t.static do thing_physics(ctx, w, t, events)
 	if t.holder > 0 {
@@ -36,6 +36,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 	home := flag_home(w, t.style)
 	t.in_base = vec2_length(t.pos[0] - home) < BASE_RADIUS
 	if t.in_base && t.holder == 0 do t.timeout = FLAG_TIMEOUT
+	if !w.authority do return // the timeout, the captures and the returns are decided elsewhere
 	if t.holder == 0 && !t.in_base {
 		t.timeout -= 1
 		if t.timeout <= 0 {
@@ -45,8 +46,8 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 			return
 		}
 	}
-	// the server's own checks: a carrier home with the other flag scores, a loose flag
-	// touched by its own team goes home
+	// a carrier home with the other flag scores, a loose flag touched by its own team
+	// goes home
 	if t.holder > 0 do flag_capture(ctx, w, t, index, events)
 	if t.holder == 0 && !t.in_base do flag_return_touch(ctx, w, t, events)
 }
@@ -113,6 +114,14 @@ flag_throw :: proc(ctx: ^Context, w: ^World, t: ^Thing, holder: ^Soldier) {
 	t.holder = 0
 	t.static = false
 	holder.holding_flag = false
+}
+
+// The carrier throws the flag it holds, if it holds one: for a throw the server heard
+// of rather than saw in the controls.
+flag_throw_held :: proc(ctx: ^Context, w: ^World, soldier: u8) {
+	for &t in w.things {
+		if is_flag(t.style) && t.holder == soldier + 1 do flag_throw(ctx, w, &t, &w.soldiers[soldier])
+	}
 }
 
 flag_respawn :: proc(ctx: ^Context, w: ^World, t: ^Thing) {

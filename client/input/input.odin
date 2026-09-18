@@ -40,8 +40,8 @@ sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons) {
 }
 
 // The command for this tick.
-command :: proc(in_: ^Input, seq: u32) -> sim.Command {
-	return {seq = seq, buttons = in_.held + in_.pressed, aim = in_.aim}
+command :: proc(in_: ^Input) -> sim.Command {
+	return {buttons = in_.held + in_.pressed, aim = in_.aim}
 }
 
 clear :: proc(in_: ^Input) {

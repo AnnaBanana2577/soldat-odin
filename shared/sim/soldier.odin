@@ -12,17 +12,25 @@ Stance :: enum u8 { Stand, Crouch, Prone }
 
 Bonus :: enum u8 { None, Flame_God, Predator, Berserker }
 
-// The first block is what its own client's commands drive and so predicts; the rest is
-// the server's alone.
+// A soldier has two owners. Where it is and what it does is its player's to say: the
+// client that plays it steps it (soldier_step) and everyone else guesses it on from
+// what they last heard (soldier_reckon). Whether it lives, and what it has won, is the
+// server's (soldier_served_tick, damage_apply). On the wire the two halves are
+// net.ser_owned and net.ser_served.
 Soldier :: struct {
+	// the server's
 	active: bool,
 	team:   Team,
 	health: f32,
 	dead:   bool,
+	// Counts the times the server has placed this soldier: a spawn, a respawn, a
+	// correction. Its client says which life it speaks of, and the server which one it
+	// means, so word from before a placing is never taken for word from after it.
+	life:     u8,
 	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
 	death_vel:  Vec2, // how it died, for the corpse any client starts from this state
 	death_part: u8,
-	rng:      u64, // its own randomness (the spread of its shots), so its client predicts it
+	rng:      u64, // its own randomness (the spread of its shots), rolled where it is played
 
 	// owned by the client that plays it
 	pos, old_pos:  Vec2,
@@ -69,12 +77,13 @@ Soldier :: struct {
 	kills, deaths, flags: i32,
 }
 
-// A fresh soldier at a spot; the tally survives a respawn.
+// A fresh soldier at a spot; the tally and the count of its lives survive a respawn.
 soldier_spawn :: proc(ctx: ^Context, s: ^Soldier, pos: Vec2, team: Team, primary, secondary: Weapon_Id) {
-	kills, deaths, flags := s.kills, s.deaths, s.flags
+	kills, deaths, flags, life := s.kills, s.deaths, s.flags, s.life
 	rng := s.rng != 0 ? s.rng : (u64(transmute(u32)pos.x) << 32 | u64(transmute(u32)pos.y)) | 1 // seeded once, from where it first stood
 	s^ = {
 		rng                = rng,
+		life               = life,
 		kills              = kills,
 		deaths             = deaths,
 		flags              = flags,
@@ -103,11 +112,13 @@ soldier_spawn :: proc(ctx: ^Context, s: ^Soldier, pos: Vec2, team: Team, primary
 	anim_set(ctx.anims, &s.body, .Stand)
 }
 
+// The server places a soldier on one of its team's spawn points: a new life.
 soldier_respawn :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
 	pos := level_spawn_point(ctx.level, s.team, &w.rng)
 	soldier_spawn(ctx, s, pos, s.team, s.primary_choice, s.secondary_choice)
-	emit(events, Respawn{target = index, pos = pos})
+	s.life += 1
+	emit(events, Respawn{target = index, life = s.life, team = s.team, primary = s.primary_choice, secondary = s.secondary_choice, pos = pos})
 }
 
 // Euler integration of the body particle, before the control step.
@@ -123,7 +134,8 @@ soldier_integrate :: proc(s: ^Soldier, gravity: f32) {
 
 // One tick of one soldier, in the original's order: integrate, take the knockback,
 // the controls through the state machines, animate, collide with the map, the
-// weapon timers, the jet fuel.
+// weapon timers, the jet fuel. Everything here is its player's half; the server's
+// half ticks in soldier_served_tick.
 soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: ^Events) {
 	s := &w.soldiers[index]
 	if !s.active || s.dead do return
@@ -136,24 +148,18 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 	s.controls = w.round.state == .Ended ? {} : cmd.buttons
 	s.aim = cmd.aim
 	// suicide is a hit on oneself, applied like any other, and a brutal one
-	if .Suicide in s.controls do emit(events, Hit{shooter = index, target = index, amount = 4 * DEFAULT_HEALTH, pos = s.pos})
+	if .Suicide in s.controls do emit(events, suicide_hit(w, index))
 	soldier_control(ctx, w, index, events)
 	s.direction = s.aim.x >= s.pos.x ? 1 : -1
 	anim_advance(ctx.anims, &s.body)
 	anim_advance(ctx.anims, &s.legs)
-	if s.cease_fire_counter > -1 do s.cease_fire_counter -= 1
 
+	if soldier_out_of_bounds(ctx, s.pos) do return // off the map: it waits for the server to place it
 	level := ctx.level
-	bound := f32(level.sectors_num * level.sectors_division - 50)
-	if abs(s.pos.x) > bound || abs(s.pos.y) > bound {
-		soldier_respawn(ctx, w, index, events)
-		return
-	}
 
 	soldier_collide(ctx, w, index, events)
 	weapon_timers(ctx, s)
 	antics_apply(ctx, w, s)
-	bonus_tick(s)
 
 	// Jet fuel regenerates when not jetting: every tick on the ground, every other in the air.
 	if s.jets < level.start_jet && .Jet not_in s.controls {
@@ -161,18 +167,79 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 	}
 }
 
-// The one thing that ticks on a dead soldier: the countdown to its respawn.
-soldier_dead_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
-	s := &w.soldiers[index]
-	s.respawn_counter -= 1
-	if s.respawn_counter < 1 do soldier_respawn(ctx, w, index, events)
+soldier_out_of_bounds :: proc(ctx: ^Context, pos: Vec2) -> bool {
+	bound := f32(ctx.level.sectors_num * ctx.level.sectors_division - 50)
+	return abs(pos.x) > bound || abs(pos.y) > bound
 }
 
-bonus_tick :: proc(s: ^Soldier) {
+// Suicide is a hit on oneself, applied like any other, and a brutal one.
+suicide_hit :: proc(w: ^World, index: u8) -> Hit {
+	return {shooter = index, target = index, amount = 4 * DEFAULT_HEALTH, pos = w.soldiers[index].pos}
+}
+
+// Buttons a dead-reckoned soldier never presses: one-shot actions that would fire,
+// throw or change weapons on this copy alone.
+NEVER_RECKONED :: Buttons{.Fire, .Throw, .Reload, .Change, .Suicide, .Drop, .Flag_Throw, .Prone}
+
+// One tick of a soldier nobody is playing here: its last known controls held on. Every
+// machine does this for every soldier but its own, the server included, so all of
+// them make the same guess until its player's word replaces it.
+soldier_reckon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
+	s := &w.soldiers[index]
+	soldier_step(ctx, w, index, Command{buttons = s.controls - NEVER_RECKONED, aim = s.aim}, events)
+}
+
+// The server's half of a soldier's tick, whoever moves it: the way back from death and
+// from off the map, the spawn protection, the bonus. Only the world that decides runs
+// this (round_tick); everyone else hears the result.
+soldier_served_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
+	s := &w.soldiers[index]
+	if !s.active do return
+	if s.dead {
+		s.respawn_counter -= 1
+		if s.respawn_counter < 1 do soldier_respawn(ctx, w, index, events)
+		return
+	}
+	if soldier_out_of_bounds(ctx, s.pos) {
+		soldier_respawn(ctx, w, index, events)
+		return
+	}
+	if s.cease_fire_counter > -1 do s.cease_fire_counter -= 1
 	if s.bonus_time > -1 {
 		s.bonus_time -= 1
 		if s.bonus_time < 1 do s.bonus = .None
 	} else {
 		s.bonus = .None
 	}
+}
+
+// What a soldier's own client decides, from a received state. In step with
+// net.ser_owned: a field copied here is a field on the wire.
+soldier_copy_owned :: proc(anims: ^Anims, dst, src: ^Soldier) {
+	dst.pos, dst.vel, dst.next_push = src.pos, src.vel, src.next_push
+	dst.controls, dst.aim = src.controls, src.aim
+	dst.direction, dst.stance = src.direction, src.stance
+	dst.on_ground, dst.jets = src.on_ground, src.jets
+	anim_copy(anims, &dst.legs, src.legs)
+	anim_copy(anims, &dst.body, src.body)
+	dst.weapon, dst.secondary, dst.grenades = src.weapon, src.secondary, src.grenades
+	dst.spawn_still, dst.para, dst.stat = src.spawn_still, src.para, src.stat
+}
+
+// What the server decides about a soldier. In step with net.ser_served.
+soldier_copy_served :: proc(dst, src: ^Soldier) {
+	dst.active, dst.dead, dst.team, dst.life = src.active, src.dead, src.team, src.life
+	dst.health, dst.vest = src.health, src.vest
+	dst.respawn_counter, dst.cease_fire_counter = src.respawn_counter, src.cease_fire_counter
+	dst.bonus, dst.bonus_time = src.bonus, src.bonus_time
+	dst.holding_flag = src.holding_flag
+	dst.kills, dst.deaths, dst.flags = src.kills, src.deaths, src.flags
+	dst.death_vel, dst.death_part = src.death_vel, src.death_part
+}
+
+// An animation arrives as its id and frame; its pace is looked up here.
+@(private = "file")
+anim_copy :: proc(anims: ^Anims, dst: ^Anim, src: Anim) {
+	if dst.id != src.id || dst.speed == 0 do anim_set(anims, dst, src.id, src.frame)
+	else do dst.frame = src.frame
 }

@@ -1,13 +1,11 @@
-package server
+package sim
 
-import "core:time"
-import "../shared/sim"
-
-// A bot: a player the server plays itself, with no client and no connection. Its brain
-// reads the server's world, in the present, and turns it into this tick's command. It
-// runs toward the nearest living enemy, jets when the target is above, jumps when it
-// stops making progress, and fires with line of sight within range. Something to
-// shoot at and be shot by, not the original's waypoint AI.
+// A bot's brain: it reads a world and turns it into this tick's command for one
+// soldier. It runs toward the nearest living enemy, jets when the target is above,
+// jumps when it stops making progress, and fires with line of sight within range,
+// leading its target by the bullet's flight. Something to shoot at and be shot by,
+// not the original's waypoint AI. The server plays its bots with it, on the world as
+// it is; the headless test client plays itself with it, on the world as it is shown.
 Bot :: struct {
 	tick:     int,
 	jet_hold: int, // ticks of jet left to hold
@@ -19,17 +17,18 @@ Bot :: struct {
 	strafe_left: int, // ticks until the next change
 }
 
-BOT_FIRE_RANGE :: 650.0
+BOT_FIRE_RANGE   :: 650.0
+BOT_BULLET_SPEED :: 24.0 // the AK's, near enough, for the lead
 
-bot_init :: proc(b: ^Bot, dodge: bool) {
-	b^ = {dodge = dodge, rng = u64(time.now()._nsec) | 1}
+bot_init :: proc(b: ^Bot, seed: u64, dodge: bool) {
+	b^ = {dodge = dodge, rng = seed | 1}
 }
 
 // This tick's command for the bot in `slot`.
-bot_command :: proc(b: ^Bot, ctx: ^sim.Context, w: ^sim.World, slot: u8) -> (cmd: sim.Command) {
+bot_command :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8) -> (cmd: Command) {
 	b.tick += 1
 	s := &w.soldiers[slot]
-	held: sim.Buttons
+	held: Buttons
 	cmd.aim = s.pos + {f32(s.direction) * 100, 0}
 	if s.active && !s.dead {
 		if target, dist := bot_nearest_enemy(w, slot); target != nil {
@@ -49,10 +48,10 @@ bot_command :: proc(b: ^Bot, ctx: ^sim.Context, w: ^sim.World, slot: u8) -> (cmd
 				}
 			}
 			if b.dodge && dist < BOT_FIRE_RANGE do bot_dodge(b, &held)
-			cmd.aim = target.pos + {(sim.rand_f32(&b.rng) * 2 - 1) * 10, -8 + (sim.rand_f32(&b.rng) * 2 - 1) * 8}
+			cmd.aim = target.pos + target.vel * (dist / BOT_BULLET_SPEED) + {(rand_f32(&b.rng) * 2 - 1) * 10, -8 + (rand_f32(&b.rng) * 2 - 1) * 8}
 			if dist < BOT_FIRE_RANGE && s.cease_fire_counter < 0 {
-				_, blocked := sim.ray_cast(ctx.level, s.pos - {0, 8}, target.pos - {0, 8}, BOT_FIRE_RANGE, {bullet = true, team = s.team})
-				if !blocked && sim.rand_int(&b.rng, 10) < 7 do held += {.Fire}
+				_, blocked := ray_cast(ctx.level, s.pos - {0, 8}, target.pos - {0, 8}, BOT_FIRE_RANGE, {bullet = true, team = s.team})
+				if !blocked && rand_int(&b.rng, 10) < 7 do held += {.Fire}
 			}
 		}
 		if b.jet_hold > 0 {
@@ -68,13 +67,13 @@ bot_command :: proc(b: ^Bot, ctx: ^sim.Context, w: ^sim.World, slot: u8) -> (cmd
 // Left, right or still, jumping and jetting, each for a few ticks at random: the moves
 // a guess from the last keys gets wrong.
 @(private = "file")
-bot_dodge :: proc(b: ^Bot, held: ^sim.Buttons) {
+bot_dodge :: proc(b: ^Bot, held: ^Buttons) {
 	b.strafe_left -= 1
 	if b.strafe_left <= 0 {
-		b.strafe = sim.rand_int(&b.rng, 3) - 1
-		b.strafe_left = 6 + sim.rand_int(&b.rng, 20)
-		if sim.rand_int(&b.rng, 3) == 0 do b.jet_hold = 4 + sim.rand_int(&b.rng, 14)
-		if sim.rand_int(&b.rng, 4) == 0 do held^ += {.Jump}
+		b.strafe = rand_int(&b.rng, 3) - 1
+		b.strafe_left = 6 + rand_int(&b.rng, 20)
+		if rand_int(&b.rng, 3) == 0 do b.jet_hold = 4 + rand_int(&b.rng, 14)
+		if rand_int(&b.rng, 4) == 0 do held^ += {.Jump}
 	}
 	held^ -= {.Left, .Right}
 	if b.strafe < 0 do held^ += {.Left}
@@ -82,12 +81,12 @@ bot_dodge :: proc(b: ^Bot, held: ^sim.Buttons) {
 }
 
 @(private = "file")
-bot_nearest_enemy :: proc(w: ^sim.World, me: u8) -> (target: ^sim.Soldier, dist: f32) {
+bot_nearest_enemy :: proc(w: ^World, me: u8) -> (target: ^Soldier, dist: f32) {
 	s := &w.soldiers[me]
 	dist = max(f32)
 	for &o, i in w.soldiers {
 		if u8(i) == me || !o.active || o.dead || o.team == .Spectator || o.team == s.team do continue
-		if d := sim.vec2_length(o.pos - s.pos); d < dist do target, dist = &o, d
+		if d := vec2_length(o.pos - s.pos); d < dist do target, dist = &o, d
 	}
 	return
 }

@@ -104,7 +104,8 @@ handle_special_poly :: proc(ctx: ^Context, w: ^World, index: u8, t: Poly_Type, p
 		if t == .Lava && rand_int(&w.rng, 3) == 0 {
 			spark := pos - {0, 3}
 			emit(events, Poly_Effect{target = index, type = .Lava, pos = spark, spark = true})
-			if rand_int(&w.rng, 3) == 0 {
+			// the map's own bullets are made where the world decides, and told from there
+			if w.authority && rand_int(&w.rng, 3) == 0 {
 				bullet_spawn(ctx, w, spark, -s.vel, .Flamer, index, ctx.weapons[.Flamer].damage, events)
 			}
 		}
@@ -117,7 +118,7 @@ handle_special_poly :: proc(ctx: ^Context, w: ^World, index: u8, t: Poly_Type, p
 		if !s.dead {
 			origin := pos - {0, 3}
 			emit(events, Poly_Effect{target = index, type = t, pos = origin})
-			bullet_spawn(ctx, w, origin, {}, .M79, index, ctx.weapons[.M79].damage, events)
+			if w.authority do bullet_spawn(ctx, w, origin, {}, .M79, index, ctx.weapons[.M79].damage, events)
 			self_hit(w, index, 4000, events)
 		}
 	case .Hurts_Flaggers:

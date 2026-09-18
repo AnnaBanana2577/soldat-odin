@@ -1,56 +1,87 @@
 package server
 
 import "core:fmt"
+import "core:time"
 import enet "vendor:ENet"
 import "../shared/net"
 import "../shared/sim"
 
-// The one true world. Every tick: one command per client (the next it queued, or the
-// last one again with its one-shot buttons dropped when none has arrived), the whole
-// world stepped, the hits it produced applied, and a snapshot of it all to every
-// client. The server decides everything; clients only send what they press.
+// The server's world is the one that decides (world.authority). A client owns where
+// its soldier is and what it fires; the server owns whether anyone lives, and
+// everything else that matters to more than one player. Its tick reads the way a
+// client's does (client/game/game.odin):
+//
+//   step_soldiers  every soldier one tick on: a bot on its brain's command, a player
+//                  as guessed from what its client last said, the same guess every
+//                  client makes of it
+//   receive        the clients' word over the guesses: where their soldiers are, what
+//                  they fired, what they did
+//   step_world     the things, every bullet against the soldiers as its shooter saw
+//                  them, the round; the hits become wounds here and nowhere else
+//   send           the things that changed, what was decided, and every other tick
+//                  the soldiers and the bullets born
+//
+// Time. A client shows the others a little in the past, and says with every packet
+// which server tick that is. The difference from the tick its packet arrives in is its
+// lag. A bullet keeps its shooter's lag and meets the soldiers as they were that long
+// ago, all the way (sim/history.odin), so a shot lands where its shooter aimed it. The
+// other clients fly that bullet on by its shooter's lag plus their own (client/game),
+// so the bullet each of them sees is the one that will be ruled on.
 Game :: struct {
-	ctx:       sim.Context,
-	level:     sim.Level,
-	anims:     ^sim.Anims,
-	skeletons: ^sim.Skeletons,
-	world:     sim.World,
-	events:    sim.Events,
-	map_name:  string,
-	clients:   [sim.MAX_PLAYERS]Client,
-	history:   sim.History,   // the last second of soldiers, for judging shots as their shooters saw
-	max_rewind: u32,          // ticks: how far back a shot is judged at most; a slower shooter leads
-	next_fact: u32,           // the facts are numbered as they happen
-	snapshot:  net.Snapshot,  // the next one, its events gathering until it goes
-	sent:      ^[SENT_RING]net.Snapshot, // as sent, by tick, the bases of the deltas
-	writer:    net.Writer,
+	ctx:        sim.Context,
+	level:      sim.Level,
+	anims:      ^sim.Anims,
+	skeletons:  ^sim.Skeletons,
+	world:      sim.World,
+	history:    sim.History, // the last second of soldiers, for judging shots as their shooters saw
+	max_rewind: u32,         // ticks: how far back a shot is judged at most; a slower shooter leads
+	events:     sim.Events,  // this tick's
+	map_name:   string,
+	clients:    [sim.MAX_PLAYERS]Client,
+	born:       [dynamic]Born,            // the bullets born lately, each told a few updates running
+	shot_seq:   [sim.MAX_PLAYERS]u32,     // the last number given to each shooter's bullets
+	things_sent: [sim.MAX_THINGS]sim.Thing, // as the clients last heard them
+
+	incoming, outgoing: net.Message, // scratch: an Update is too large for the stack
+	buf: [net.MAX_PACKET]u8,
 }
 
-SENT_RING :: 64 // snapshots kept as delta bases: a second of them
-
-// A client's commands wait here in order until their tick comes. Steady play keeps a
-// couple queued; the snapshot tells the client how many, and it runs its clock a
-// little faster or slower to hold that.
 Client :: struct {
-	connected: bool,
-	bot:       Maybe(Bot),           // played by the server itself: no peer, no queue, no snapshots
-	queue:     [dynamic]sim.Command, // by seq, all newer than ack
-	last:      sim.Command,          // the command applied last tick
-	ack:       u32,                  // the seq of `last`
-	depth:     u8,                   // how many were waiting when this tick began
-	view_tick: u32,                  // the tick the client shows the others at
-	have:      u32,                  // the newest snapshot it holds, the base of its next delta
-	facts:     [dynamic]Queued_Fact, // the server's decisions it has not acknowledged, oldest first
-	rewound, capped, ticks: int,     // how far back its shots were judged, summed; ticks at the cap; ticks
+	connected:  bool,
+	bot:        Maybe(sim.Bot), // played by the server itself (sim/bot.odin): no peer, nothing received or sent
+	heard:      u32, // the tick its soldier was last taken as its client sent it
+	lag:        f32, // how late it sees the world, in ticks, smoothed: told back to it
+	last_shot:  u32, // the newest of its shots seen
+	tokens:     f32, // the fire-rate bucket
+	token_tick: u32,
+	// for the leave line: the hits it gave and took as ruled here, which its own summary
+	// has as it saw them; `judged` sums how far back its shots were ruled
+	shots, refused, hits_given, hits_taken, judged: int,
 }
 
-// A fact on its way to a client, and the first snapshot that carried it (0: none yet).
-Queued_Fact :: struct {
-	fact:    net.Timed_Event,
-	sent_in: u32,
+// The birth of a bullet, kept while it is being told.
+Born :: struct {
+	fired:      net.Fired,
+	tick:       u32,
+	to_shooter: bool, // the server's own making (a bot's, the map's): its soldier's client has not seen it
 }
 
-MAX_QUEUE :: 30 // commands a client may have waiting; older ones beyond this are dropped
+UPDATE_EVERY    :: 2  // ticks between updates: 30 a second
+OFFSCREEN_EVERY :: 15 // updates between words of a soldier out of the receiver's view: twice a second
+BORN_TOLD       :: 6  // ticks a bullet's birth keeps being told: three updates, so a lost one loses no bullet
+VIEW_HALF       :: sim.Vec2{900, 700} // of a client's view; generous: the camera leads toward the cursor
+SHOT_REACH      :: 1200.0 // a bullet whose line of flight passes this near a client is told to it
+SILENCE_LIMIT   :: 30  // ticks without word before a player's soldier lets go of its keys
+LAG_SMOOTHING   :: 0.1 // share of each new measure in the lag a client is told
+
+// What the server will not take a client's word for. A soldier moves at most this far
+// in a tick (the sim caps each axis at 11); a shot starts this near its shooter and
+// no faster than its weapon shoots.
+MAX_SPEED        :: 16.0
+MOVE_SLACK       :: 32.0
+MOVE_MAX_GAP     :: 15
+MUZZLE_REACH     :: 366.0
+SHOT_SPEED_SLACK :: 12.0
 
 game_init :: proc(g: ^Game, base, map_name: string, max_rewind: u32) {
 	g.max_rewind = min(max_rewind, sim.HISTORY_TICKS - 1)
@@ -63,84 +94,186 @@ game_init :: proc(g: ^Game, base, map_name: string, max_rewind: u32) {
 	g.ctx.skeletons = g.skeletons
 	sim.weapons_default(&g.ctx.weapons)
 	sim.world_init(&g.world, 1)
+	g.world.authority = true
 	g.world.history = &g.history
-	g.sent = new([SENT_RING]net.Snapshot)
 	sim.round_init(&g.world.round)
 	sim.things_spawn(&g.ctx, &g.world)
 }
 
-// Every packet since the last tick: a hello joins, inputs queue their commands. Peers
-// that left leave.
-receive_client_messages :: proc(g: ^Game, host: ^Host) {
+tick :: proc(g: ^Game, host: ^Host) {
+	step_soldiers(g)
+	receive(g, host)
+	step_world(g)
+	sim.history_record(&g.history, &g.world) // under this tick, as the update of this tick tells them
+	send(g, host)
+	sim.events_clear(&g.events)
+	g.world.tick += 1
+}
+
+// ---- the soldiers ----
+
+// Every soldier one tick on. What a step causes counts here: a wound from lava, a fall
+// off the map, a bot's shots. The bullets these steps made are the server's to tell,
+// their soldier's own client included.
+step_soldiers :: proc(g: ^Game) {
+	w := &g.world
+	for &c, i in g.clients {
+		if !c.connected do continue
+		slot := u8(i)
+		if brain, is_bot := &c.bot.?; is_bot {
+			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(brain, &g.ctx, w, slot), &g.events)
+		} else {
+			if w.tick - c.heard > SILENCE_LIMIT do w.soldiers[i].controls = {}
+			sim.soldier_reckon(&g.ctx, w, slot, &g.events)
+		}
+	}
+	for e in sim.events_slice(&g.events) {
+		if v, is_spawn := e.(sim.Bullet_Spawn); is_spawn do tell_born(g, int(v.id), to_shooter = true)
+	}
+}
+
+// ---- receiving ----
+
+// Every packet since the last tick, in the order it came. Peers that left leave.
+receive :: proc(g: ^Game, host: ^Host) {
 	for p in host_receive(host) {
-		r := net.reader_make(p.data)
-		kind := net.Msg(net.read_u8(&r))
+		if !net.decode(p.data, &g.incoming) do continue
 		if p.slot == NO_SLOT {
-			if kind == .Hello {
-				if m, ok := net.decode_hello(&r); ok do join(g, host, p.peer, m)
-			}
+			if m, is_hello := g.incoming.(net.Hello); is_hello do join(g, host, p.peer, m)
 			continue
 		}
-		if kind == .Input {
-			if m, ok := net.decode_input(&r); ok do enqueue(&g.clients[p.slot], &m)
+		#partial switch &m in g.incoming {
+		case net.Input: receive_input(g, host, p.slot, &m)
+		case net.Act:   receive_act(g, p.slot, m)
 		}
 	}
 	for slot in host.left do leave(g, slot)
 }
 
-// The commands not seen yet, in order; a lost packet costs nothing because the next
-// one carries them again.
-enqueue :: proc(c: ^Client, m: ^net.Input) {
-	c.view_tick = m.view_tick
-	c.have = m.have
-	for cmd in m.commands[:m.count] {
-		if cmd.seq <= c.ack do continue
-		at := len(c.queue)
-		for q, i in c.queue {
-			if q.seq == cmd.seq {
-				at = -1 // already here
-				break
-			}
-			if q.seq > cmd.seq {
-				at = i
-				break
-			}
-		}
-		if at >= 0 do inject_at(&c.queue, at, cmd)
-	}
-	for len(c.queue) > MAX_QUEUE do ordered_remove(&c.queue, 0)
-}
+// A client's soldier as it has it, and its shots. The packet's lag is measured
+// whatever it holds. The soldier is taken as sent when it speaks of the life the
+// server means and could have got there; one that could not is put back.
+receive_input :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Input) {
+	c := &g.clients[slot]
+	s := &g.world.soldiers[slot]
+	tick := g.world.tick
+	behind := tick > m.view_tick ? tick - m.view_tick : 0
+	c.lag += (f32(behind) - c.lag) * LAG_SMOOTHING
+	if !m.has_state || !s.active || s.dead || m.life != s.life do return
 
-// A newcomer: a slot, a soldier on the smaller team's spawn, and the welcome.
-join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
-	if m.version != net.VERSION || m.layout != net.LAYOUT {
-		w: net.Writer
-		net.encode_denied(&w, m.version != net.VERSION ? "wrong version" : "different build")
-		peer_send(peer, net.writer_bytes(&w), reliable = true)
+	gap := f32(clamp(tick - c.heard, 1, MOVE_MAX_GAP))
+	if sim.vec2_length(m.soldier.pos - s.pos) > MAX_SPEED * gap + MOVE_SLACK {
+		s.life += 1 // its word of the old life counts no more; it takes up the new one where the server has it
+		g.outgoing = net.Correction{life = s.life, pos = s.pos, vel = s.vel}
+		send_message(g, host, slot)
 		return
 	}
-	slot := free_slot(g)
+	sim.soldier_copy_owned(g.ctx.anims, s, &m.soldier)
+	c.heard = tick
+	s.view_lag = u8(min(behind, g.max_rewind)) // this packet's shots are judged this far back
+	receive_shots(g, slot, m.shots[:m.shot_count])
+}
+
+// The shots not seen yet, checked before they fly. A packet's new shots are one pull
+// of the trigger (a shotgun's pellets, the Eagles' pair).
+receive_shots :: proc(g: ^Game, slot: u8, shots: []net.Shot) {
+	c := &g.clients[slot]
+	s := &g.world.soldiers[slot]
+	pulled := false
+	for shot in shots {
+		if shot.id <= c.last_shot do continue
+		c.last_shot = shot.id
+		info := &g.ctx.weapons[shot.weapon]
+		if !shot_allowed(s, info, shot) || (!pulled && !take_fire_token(c, info, g.world.tick)) {
+			c.refused += 1
+			continue
+		}
+		pulled = true
+		if index, ok := sim.bullet_spawn(&g.ctx, &g.world, shot.pos, shot.vel, shot.weapon, slot, info.damage, &g.events); ok {
+			c.shots += 1
+			c.judged += int(s.view_lag)
+			tell_born(g, index, to_shooter = false)
+		}
+	}
+}
+
+// A weapon the soldier holds, or its hands or something thrown; not under cease fire;
+// from where the soldier is; no faster than the weapon shoots.
+shot_allowed :: proc(s: ^sim.Soldier, info: ^sim.Weapon_Info, shot: net.Shot) -> bool {
+	held := shot.weapon == s.weapon.id || shot.weapon == s.secondary.id
+	loose := shot.weapon == .None || shot.weapon == .Frag || shot.weapon == .Cluster_Nade || shot.weapon == .Thrown_Knife || shot.weapon == .M2
+	if !held && !loose do return false
+	if s.cease_fire_counter >= 0 do return false
+	if sim.vec2_length(shot.pos - s.pos) > MUZZLE_REACH do return false
+	return sim.vec2_length(shot.vel) <= info.speed + MAX_SPEED * info.inherit + SHOT_SPEED_SLACK
+}
+
+// A token bucket: the weapon's average rate holds, and a couple of shots that arrive
+// bunched together by the network still pass.
+take_fire_token :: proc(c: ^Client, info: ^sim.Weapon_Info, tick: u32) -> bool {
+	interval := f32(max(info.fire_interval, 3))
+	c.tokens = min(2, c.tokens + f32(tick - c.token_tick) / interval)
+	c.token_tick = tick
+	if c.tokens < 1 do return false
+	c.tokens -= 1
+	return true
+}
+
+// What a client did that only the server can make happen.
+receive_act :: proc(g: ^Game, slot: u8, m: net.Act) {
+	s := &g.world.soldiers[slot]
+	if !s.active || s.dead do return
+	switch m.action {
+	case .Throw_Gun:
+		// the gun as the thrower held it, from its soldier as the server has it
+		if m.weapon != .None do sim.dropped_gun_throw(&g.ctx, &g.world, slot, s, m.weapon, m.ammo, &g.events)
+	case .Throw_Flag:
+		sim.flag_throw_held(&g.ctx, &g.world, slot)
+	case .Suicide:
+		sim.emit(&g.events, sim.suicide_hit(&g.world, slot))
+	}
+}
+
+// A bullet just born here, for the clients to hear of: numbered for its shooter, with
+// the lag it is judged by.
+tell_born :: proc(g: ^Game, index: int, to_shooter: bool) {
+	b := &g.world.bullets[index]
+	g.shot_seq[b.owner] += 1
+	fired := net.Fired{shooter = b.owner, seq = g.shot_seq[b.owner], lag = b.lag, weapon = b.weapon, pos = b.pos, vel = b.vel}
+	append(&g.born, Born{fired = fired, tick = g.world.tick, to_shooter = to_shooter})
+}
+
+// ---- joining and leaving ----
+
+// A newcomer: a slot, the welcome, the things as they stand, and a soldier on the
+// smaller team, whose placing goes out with this tick's facts like any respawn.
+join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
+	slot := m.version == net.VERSION ? free_slot(g) : NO_SLOT
 	if slot == NO_SLOT {
-		w: net.Writer
-		net.encode_denied(&w, "server full")
-		peer_send(peer, net.writer_bytes(&w), reliable = true)
+		g.outgoing = net.Denied{reason = m.version != net.VERSION ? "wrong version" : "server full"}
+		if size, ok := net.encode(g.buf[:], &g.outgoing); ok do peer_send(peer, g.buf[:size], reliable = true)
 		return
 	}
 	host_bind(host, slot, peer)
-	g.clients[slot] = {connected = true}
+	tick := g.world.tick
+	g.clients[slot] = {connected = true, heard = tick, token_tick = tick}
+	g.outgoing = net.Welcome{slot = slot, map_name = g.map_name}
+	send_message(g, host, slot)
+	things: net.Things
+	for &t, i in g.world.things {
+		if t.style != .None do things_add(g, host, slot, &things, i, &t)
+	}
+	things_flush(g, host, slot, &things)
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("%s joined as slot %d on %v", m.name, slot, team)
-	w: net.Writer
-	net.encode_welcome(&w, {slot = slot, tick = g.world.tick, map_name = g.map_name})
-	host_send(host, slot, net.writer_bytes(&w), reliable = true)
 }
 
 // A bot, in the first free slot, on the smaller team.
 add_bot :: proc(g: ^Game, dodge: bool) {
 	slot := free_slot(g)
 	if slot == NO_SLOT do return
-	brain: Bot
-	bot_init(&brain, dodge)
+	brain: sim.Bot
+	sim.bot_init(&brain, u64(time.now()._nsec), dodge)
 	g.clients[slot] = {connected = true, bot = brain}
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("a bot joined as slot %d on %v", slot, team)
@@ -152,7 +285,7 @@ free_slot :: proc(g: ^Game) -> u8 {
 	return NO_SLOT
 }
 
-// A soldier for a newcomer, on the smaller team's spawn.
+// A soldier for a newcomer, placed on the smaller team's spawn: its first life.
 spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 	alpha, bravo := 0, 0
 	for &s in g.world.soldiers {
@@ -161,103 +294,154 @@ spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 		if s.team == .Bravo do bravo += 1
 	}
 	team := alpha <= bravo ? sim.Team.Alpha : sim.Team.Bravo
-	pos := sim.level_spawn_point(g.ctx.level, team, &g.world.rng)
-	sim.soldier_spawn(&g.ctx, &g.world.soldiers[slot], pos, team, .AK74, .Colt)
+	g.world.soldiers[slot] = {team = team, primary_choice = .AK74, secondary_choice = .Colt}
+	sim.soldier_respawn(&g.ctx, &g.world, slot, &g.events)
 	return team
 }
 
 leave :: proc(g: ^Game, slot: u8) {
-	g.world.soldiers[slot].active = false
 	c := &g.clients[slot]
-	fmt.printfln("slot %d left; its shots were judged %.0f ms back on average, at the cap %.0f%% of the time",
-		slot, f64(c.rewound) / f64(max(c.ticks, 1)) * 1000 / sim.TICK_RATE, 100 * f64(c.capped) / f64(max(c.ticks, 1)))
-	delete(c.queue)
-	delete(c.facts)
+	fmt.printfln("slot %d left: %d shots taken and %d refused, %d hits given and %d taken as ruled here, judged %.0f ms back on average",
+		slot, c.shots, c.refused, c.hits_given, c.hits_taken, f64(c.judged) / f64(max(c.shots, 1)) * 1000 / sim.TICK_RATE)
+	g.world.soldiers[slot].active = false
 	c^ = {}
 }
 
-// One tick of the world on this tick's commands, then the wounds the step reported.
-// Each soldier carries how far behind the present its client shows the others, so
-// the shots it fires this tick are judged against the soldiers of that moment, up to
-// the cap: a shooter further behind leads its shots by the rest, and nobody is hit
-// where it stood longer ago than the cap.
-tick :: proc(g: ^Game) {
-	cmds: [sim.MAX_PLAYERS]sim.Command
-	for &c, i in g.clients {
-		if !c.connected do continue
-		if brain, is_bot := &c.bot.?; is_bot {
-			cmds[i] = bot_command(brain, &g.ctx, &g.world, u8(i)) // it sees the present: nothing to rewind
-			continue
-		}
-		c.depth = u8(min(len(c.queue), 255))
-		if len(c.queue) > 0 {
-			c.last = c.queue[0]
-			ordered_remove(&c.queue, 0)
-			c.ack = c.last.seq
-		} else {
-			c.last.buttons -= sim.ONE_SHOT // a press counts once, however long the gap
-		}
-		cmds[i] = c.last
-		behind := g.world.tick > c.view_tick ? g.world.tick - c.view_tick : 0
-		lag := min(behind, g.max_rewind)
-		g.world.soldiers[i].view_lag = u8(lag)
-		c.rewound += int(lag)
-		c.ticks += 1
-		if behind > g.max_rewind do c.capped += 1
-	}
-	sim.step(&g.ctx, &g.world, cmds[:], &g.events)
-	sim.history_record(&g.history, &g.world)
-	// the hits become wounds here and nowhere else; what they cause joins the events
+// ---- the world ----
+
+// The things, the bullets and the round, and then the hits become wounds, here and
+// nowhere else. What the wounds cause (a death, a dropped gun) joins the events.
+step_world :: proc(g: ^Game) {
+	w := &g.world
+	sim.things_update(&g.ctx, w, &g.events)
+	sim.bullets_update(&g.ctx, w, &g.events)
+	sim.round_tick(&g.ctx, w, &g.events)
 	reported := g.events.count
 	for i in 0 ..< reported {
-		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, &g.world, hit, &g.events)
+		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, w, hit, &g.events)
 	}
-	// the actions go in the next snapshot; the decisions into every client's queue
 	for e in sim.events_slice(&g.events) {
-		if _, action := sim.event_owner(e); action {
-			sim.emit(&g.snapshot.events, e)
-			continue
+		if v, wounded := e.(sim.Damage); wounded && v.attacker != v.target {
+			g.clients[v.attacker].hits_given += 1
+			g.clients[v.target].hits_taken += 1
 		}
-		fact := net.Timed_Event{seq = g.next_fact, tick = g.world.tick, e = e}
-		g.next_fact += 1
-		for &c in g.clients do if c.connected && c.bot == nil do append(&c.facts, Queued_Fact{fact = fact})
 	}
 }
 
-// Every SNAPSHOT_EVERY ticks, the world as it stands to every client, each with its
-// own ack, queue depth and facts, as a delta against the newest snapshot it says it
-// holds. A fact leaves the queue once the client holds a snapshot that carried it.
-send_snapshots :: proc(g: ^Game, host: ^Host) {
-	if g.world.tick % net.SNAPSHOT_EVERY != 0 do return
-	snap := &g.snapshot
-	snap.tick = g.world.tick
-	snap.round = g.world.round
-	snap.soldiers = g.world.soldiers
-	snap.things = g.world.things
-	snap.bullets = g.world.bullets
-	g.sent[snap.tick % SENT_RING] = snap^
-	defer sim.events_clear(&snap.events)
-	for &c, i in g.clients {
-		if !c.connected || c.bot != nil do continue
-		snap.ack = c.ack
-		snap.queue_depth = c.depth
-		base: ^net.Snapshot
-		if c.have != 0 && c.have < snap.tick && c.have + SENT_RING > snap.tick && g.sent[c.have % SENT_RING].tick == c.have do base = &g.sent[c.have % SENT_RING]
-		for len(c.facts) > 0 && c.facts[0].sent_in != 0 && c.facts[0].sent_in <= c.have do ordered_remove(&c.facts, 0)
-		facts: [net.MAX_FACTS_PER_SNAPSHOT]net.Timed_Event
-		n := min(len(c.facts), net.MAX_FACTS_PER_SNAPSHOT)
-		for k in 0 ..< n {
-			q := &c.facts[k]
-			if q.sent_in == 0 do q.sent_in = snap.tick
-			facts[k] = q.fact
-		}
-		g.writer.len = 0
-		g.writer.overflow = false
-		net.encode_snapshot(&g.writer, snap, base, facts[:n])
-		if g.writer.overflow {
-			fmt.eprintln("snapshot too large to send")
-			return
-		}
-		host_send(host, u8(i), net.writer_bytes(&g.writer), reliable = false)
+// ---- sending ----
+
+send :: proc(g: ^Game, host: ^Host) {
+	send_things(g, host)
+	send_facts(g, host)
+	if g.world.tick % UPDATE_EVERY == 0 do send_updates(g, host)
+	for len(g.born) > 0 && g.world.tick - g.born[0].tick >= BORN_TOLD do ordered_remove(&g.born, 0)
+	host_flush(host)
+}
+
+// A thing goes out whole, to everyone, when it appears or goes, changes hands, or
+// starts or stops moving. From those numbers every client runs the same physics
+// until the next change.
+send_things :: proc(g: ^Game, host: ^Host) {
+	things: net.Things
+	for &t, i in g.world.things {
+		last := &g.things_sent[i]
+		if t.style == last.style && t.holder == last.holder && t.static == last.static do continue
+		things_add(g, host, EVERYONE, &things, i, &t)
+		last^ = t
 	}
+	things_flush(g, host, EVERYONE, &things)
+}
+
+things_add :: proc(g: ^Game, host: ^Host, to: u8, m: ^net.Things, index: int, t: ^sim.Thing) {
+	m.indices[m.count] = u8(index)
+	m.things[m.count] = t^
+	m.count += 1
+	if m.count == net.MAX_THINGS_PER_MSG do things_flush(g, host, to, m)
+}
+
+things_flush :: proc(g: ^Game, host: ^Host, to: u8, m: ^net.Things) {
+	if m.count == 0 do return
+	g.outgoing = m^
+	send_message(g, host, to)
+	m.count = 0
+}
+
+// What only the server could decide this tick: deaths, respawns, pickups, scores.
+send_facts :: proc(g: ^Game, host: ^Host) {
+	facts: net.Facts
+	for e in sim.events_slice(&g.events) {
+		if net.fact_kind(e) == .None do continue
+		facts.events[facts.count] = e
+		facts.count += 1
+		if facts.count == net.MAX_FACTS_PER_MSG {
+			g.outgoing = facts
+			send_message(g, host, EVERYONE)
+			facts.count = 0
+		}
+	}
+	if facts.count > 0 {
+		g.outgoing = facts
+		send_message(g, host, EVERYONE)
+	}
+}
+
+// To each client, the world as it stands: which slots are in play, the soldiers in its
+// view (its own with the server's half only: the rest is its to say), those out of
+// view now and then, and the bullets born lately that could come into its view.
+send_updates :: proc(g: ^Game, host: ^Host) {
+	w := &g.world
+	active: u32
+	for &s, i in w.soldiers do if s.active do active |= 1 << u32(i)
+	turn := w.tick / UPDATE_EVERY
+	for &c, ri in g.clients {
+		if !c.connected || c.bot != nil do continue
+		me := &w.soldiers[ri]
+		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
+		g.outgoing = net.Update{tick = w.tick, your_lag = u8(min(c.lag + 0.5, 255)), round = w.round, active = active}
+		m := &g.outgoing.(net.Update)
+		for &s, i in w.soldiers {
+			if !s.active do continue
+			mine := i == ri
+			seen := mine || !watching || in_view(me.pos, s.pos)
+			if !seen && (turn + u32(i)) % OFFSCREEN_EVERY != 0 do continue
+			m.entries[m.entry_count] = {slot = u8(i), has_owned = !mine && !s.dead, soldier = s}
+			m.entry_count += 1
+		}
+		for &b in g.born {
+			if m.fired_count == net.MAX_SHOTS_PER_UPDATE do break
+			if int(b.fired.shooter) == ri && !b.to_shooter do continue
+			if watching && !could_reach(me.pos, b.fired.pos, b.fired.vel) do continue
+			m.fired[m.fired_count] = b.fired
+			m.fired[m.fired_count].age = u8(w.tick - b.tick)
+			m.fired_count += 1
+		}
+		send_message(g, host, u8(ri))
+	}
+}
+
+in_view :: proc(eye, point: sim.Vec2) -> bool {
+	d := point - eye
+	return abs(d.x) <= VIEW_HALF.x && abs(d.y) <= VIEW_HALF.y
+}
+
+// Could a bullet born at `pos` flying along `vel` come into the view around `eye`:
+// does its line of flight pass near?
+could_reach :: proc(eye, pos, vel: sim.Vec2) -> bool {
+	dir := sim.vec2_normalize(vel)
+	along := max(sim.vec2_dot(eye - pos, dir), 0)
+	return sim.vec2_length(eye - (pos + dir * along)) <= SHOT_REACH
+}
+
+EVERYONE :: NO_SLOT
+
+// g.outgoing, on the delivery its kind has, to a slot or to EVERYONE.
+send_message :: proc(g: ^Game, host: ^Host, to: u8) {
+	size, ok := net.encode(g.buf[:], &g.outgoing)
+	if !ok {
+		fmt.eprintln("a message did not fit its packet:", net.message_kind(&g.outgoing))
+		return
+	}
+	reliable := net.RELIABLE[net.message_kind(&g.outgoing)]
+	if to == EVERYONE do host_broadcast(host, g.buf[:size], reliable)
+	else do host_send(host, to, g.buf[:size], reliable)
 }

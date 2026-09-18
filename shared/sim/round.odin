@@ -1,8 +1,8 @@
 package sim
 
-// The round: the settings that shape it, the scores, the time limit, cease fire,
-// and the per-tick clock the server owns: respawn timers of the soldiers it does not
-// step, kit and flag timers (in their files), the end of the round.
+// The round: the settings that shape it, the scores, the time limit, and the per-tick
+// clock of the world that decides: what it keeps of every soldier (soldier_served_tick),
+// the kit and flag timers (in their files), the end of the round.
 // Port of shared/sim/rules.lua.
 
 Match_State :: enum u8 { Playing, Ended, Paused }
@@ -35,9 +35,7 @@ round_init :: proc(r: ^Round) {
 
 round_tick :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 	r := &w.round
-	for &s, i in w.soldiers {
-		if s.active && s.dead do soldier_dead_tick(ctx, w, u8(i), events)
-	}
+	for i in 0 ..< MAX_PLAYERS do soldier_served_tick(ctx, w, u8(i), events)
 	if r.state != .Playing do return
 	r.time_left -= 1
 	if r.time_left <= 0 || r.scores[.Alpha] >= r.score_limit || r.scores[.Bravo] >= r.score_limit {

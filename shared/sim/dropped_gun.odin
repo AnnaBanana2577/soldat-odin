@@ -75,6 +75,6 @@ dropped_gun_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, soldi
 	s := &w.soldiers[soldier]
 	s.weapon = weapon_state(ctx, t.weapon)
 	s.weapon.ammo = t.ammo
-	emit(events, Weapon_Pickup{player = soldier, thing = index, weapon = t.weapon, pos = t.pos[0]})
+	emit(events, Weapon_Pickup{player = soldier, thing = index, weapon = t.weapon, ammo = t.ammo, pos = t.pos[0]})
 	thing_clear(t)
 }

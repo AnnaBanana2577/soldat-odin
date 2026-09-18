@@ -41,25 +41,21 @@ open :: proc(c: ^Connection, address: string, port: u16, name: string) -> bool {
 			// ENet's throttle off for our side too, as the server does for its side
 			enet.peer_throttle_configure(c.peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
 			c.peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
-			w: net.Writer
-			net.encode_hello(&w, name)
-			send(c, net.writer_bytes(&w), reliable = true)
+			send_message(c, net.Hello{version = net.VERSION, name = name})
 		case .RECEIVE:
-			r := net.reader_make(event.packet.data[:event.packet.dataLength])
-			kind := net.Msg(net.read_u8(&r))
-			if kind == .Welcome {
-				if m, ok := net.decode_welcome(&r); ok {
-					c.slot = m.slot
-					c.map_name = fmt.aprint(m.map_name)
-					enet.packet_destroy(event.packet)
-					return true
-				}
-			} else if kind == .Denied {
-				fmt.eprintfln("server refused: %s", net.read_string(&r))
-				enet.packet_destroy(event.packet)
+			reply: net.Message
+			decoded := net.decode(event.packet.data[:event.packet.dataLength], &reply)
+			defer enet.packet_destroy(event.packet)
+			if !decoded do continue
+			#partial switch m in reply {
+			case net.Welcome:
+				c.slot = m.slot
+				c.map_name = fmt.aprint(m.map_name)
+				return true
+			case net.Denied:
+				fmt.eprintfln("server refused: %s", m.reason)
 				return false
 			}
-			enet.packet_destroy(event.packet)
 		case .DISCONNECT:
 			return false
 		}
@@ -116,8 +112,22 @@ receive :: proc(c: ^Connection) -> [][]u8 {
 			send_now(c, h.data, h.reliable)
 			delete(h.data)
 		}
+		flush(c)
 	}
 	return c.inbox[:]
+}
+
+// ENet only queues what it is given and sends it the next time it is pumped, which is
+// a tick away: what this tick queued goes now.
+flush :: proc(c: ^Connection) {
+	enet.host_flush(c.host)
+}
+
+// A message, on the delivery its kind has.
+send_message :: proc(c: ^Connection, msg: net.Message) {
+	m := msg
+	buf: [net.MAX_PACKET]u8
+	if size, ok := net.encode(buf[:], &m); ok do send(c, buf[:size], net.RELIABLE[net.message_kind(&m)])
 }
 
 send :: proc(c: ^Connection, data: []u8, reliable: bool) {

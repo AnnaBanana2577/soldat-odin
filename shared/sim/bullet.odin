@@ -77,7 +77,19 @@ bullet_integrate :: proc(w: ^World, b: ^Bullet) {
 	b.forces = {}
 }
 
-@(private = "file")
+// A bullet heard of late, flown on alone to where it is by now: whole ticks of its own,
+// each as bullets_update gives every bullet (its collisions, then its flight).
+bullet_fast_forward :: proc(ctx: ^Context, w: ^World, index: int, ticks: int, events: ^Events) {
+	b := &w.bullets[index]
+	for _ in 0 ..< ticks {
+		if !b.active do return
+		bullet_update(ctx, w, b, u16(index), events)
+		if b.active do bullet_integrate(w, b)
+	}
+}
+
+// One tick of one bullet, all but its flight: the map's edge, its collisions, its
+// timeout, the damage falling off.
 bullet_update :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, events: ^Events) {
 	level := ctx.level
 	bound := f32(level.sectors_num * level.sectors_division - 10)

@@ -131,6 +131,7 @@ thing_place :: proc(ctx: ^Context, t: ^Thing, style: Thing_Style, pos: Vec2, wea
 }
 
 thing_create :: proc(ctx: ^Context, w: ^World, style: Thing_Style, pos: Vec2, weapon: Weapon_Id = .None) -> (index: int, ok: bool) {
+	if !w.authority do return 0, false // things are made where they are decided
 	for &t, i in w.things {
 		if t.style != .None || t.respawn_wait > 0 do continue
 		thing_place(ctx, &t, style, pos, weapon)
@@ -182,7 +183,7 @@ things_update :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 		thing_pickup(ctx, w, &t, u8(i), events)
 		switch t.style {
 		case .None:
-			kit_respawn_tick(ctx, w, &t)
+			if w.authority do kit_respawn_tick(ctx, w, &t)
 		case .Alpha_Flag, .Bravo_Flag:
 			flag_update(ctx, w, &t, u8(i), events)
 		case .Weapon:
@@ -197,12 +198,11 @@ things_update :: proc(ctx: ^Context, w: ^World, events: ^Events) {
 	}
 }
 
-// A client's claim to have taken a thing: judged with the claimant alone in mind,
-// first claim wins. Returns true and emits the pickup when taken.
-// Whoever stands by a free thing and may have it takes it: the other team'"'"'s flag, a
+// Whoever stands by a free thing and may have it takes it: the other team's flag, a
 // kit one can use, a gun with empty hands. The first soldier in slot order wins a tie.
+// Decided only where the world has authority.
 thing_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Events) {
-	if t.style == .None || t.holder != 0 do return
+	if !w.authority || t.style == .None || t.holder != 0 do return
 	for &s, i in w.soldiers {
 		if !s.active || s.dead do continue
 		#partial switch t.style {

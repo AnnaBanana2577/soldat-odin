@@ -83,8 +83,19 @@ kit_can_pickup :: proc(w: ^World, t: ^Thing, s: ^Soldier) -> bool {
 
 // The pickup: what the kit gives, the thing gone, its respawn timer set.
 kit_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, soldier: u8, events: ^Events) {
-	s := &w.soldiers[soldier]
 	style := t.style
+	kit_give(ctx, w, &w.soldiers[soldier], style)
+	emit(events, Kit_Pickup{player = soldier, thing = index, kit = style, pos = t.pos[0]})
+	thing_clear(t)
+	if !is_bonus_kit(style) {
+		t.respawn_wait = w.round.respawn_time
+		t.respawn_style = style
+	}
+}
+
+// What a kit gives. The server gives it on the pickup; the taker's own client gives
+// itself the parts it owns (grenades, the flamer) when it hears of it.
+kit_give :: proc(ctx: ^Context, w: ^World, s: ^Soldier, style: Thing_Style) {
 	#partial switch style {
 	case .Medical_Kit:
 		s.health = DEFAULT_HEALTH
@@ -105,11 +116,5 @@ kit_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, soldier: u8, 
 		s.vest = DEFAULT_VEST
 	case .Cluster_Kit:
 		s.grenades = CLUSTER_GRENADES
-	}
-	emit(events, Kit_Pickup{player = soldier, thing = index, kit = style, pos = t.pos[0]})
-	thing_clear(t)
-	if !is_bonus_kit(style) {
-		t.respawn_wait = w.round.respawn_time
-		t.respawn_style = style
 	}
 }

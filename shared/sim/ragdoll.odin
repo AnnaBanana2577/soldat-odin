@@ -39,7 +39,7 @@ Ragdoll :: struct {
 
 // The ragdoll of a dead soldier, from its last pose: where it is, and the velocity it
 // died with back, so the body keeps the motion. Its state says how it died, so any
-// client can start the corpse from a snapshot alone.
+// client can start the corpse from the server's word alone.
 ragdoll_start :: proc(ctx: ^Context, w: ^World, index: u8) {
 	s := &w.soldiers[index]
 	r := &w.ragdolls[index]
