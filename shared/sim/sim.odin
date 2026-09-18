@@ -13,9 +13,10 @@
 // Who runs what (server authority):
 //   - The server runs the one true world with step() on everyone's commands and
 //     applies the hits (damage_apply). What it sends is the world whole.
-//   - A client rebuilds its world from the newest snapshot every tick and replays its
+//   - A client rebuilds its world from the newest snapshot every tick, replays its
 //     own pending commands on it (soldier_step, things_update, bullets_update),
-//     which predicts everything they touch. It applies no wounds.
+//     which predicts everything they touch, and overwrites everything that is not
+//     its own from the snapshots as it shows them. It applies no wounds.
 //   - Tools and tests run step() on a whole world, which does all of it at once.
 //
 // Files, one per object:

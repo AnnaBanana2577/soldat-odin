@@ -54,12 +54,15 @@ App :: struct {
 }
 
 Options :: struct {
+	port:         u16,
+	interp_ticks: int,  // how far behind the newest snapshot the world is shown; 0: by the jitter
 	base:     string,
 	map_name: string,
 	join:     string,
 	windowed: bool,
 	name:     string,
 	bot:      bool,
+	dodge:    bool, // a bot that dodges in a fight
 	ping, jitter, loss: f64, // the simulated line: round trip ms, extra ms at random, percent lost
 }
 
@@ -94,13 +97,13 @@ init :: proc() {
 		sparks_load(&app.sparks, o.base)
 	}
 
-	if !connect(&app.conn, strings.clone_to_cstring(o.join, context.temp_allocator), net.DEFAULT_PORT, o.name) {
+	if !connect(&app.conn, strings.clone_to_cstring(o.join, context.temp_allocator), o.port, o.name) {
 		fmt.eprintfln("could not reach %s", o.join)
 		os.exit(1)
 	}
 	net.fake_init(&app.conn.fake, o.ping, o.jitter, o.loss)
-	game_init(&app.game, &app.assets.ctx, app.conn.slot)
-	if o.bot do bot_init(&app.bot, app.conn.slot)
+	game_init(&app.game, &app.assets.ctx, app.conn.slot, o.interp_ticks)
+	if o.bot do bot_init(&app.bot, app.conn.slot, o.dodge)
 	debug_init(&app.debug, &app.game)
 }
 
@@ -169,6 +172,7 @@ parse_options :: proc() -> (o: Options, d: Debug) {
 	o.base = "../opensoldat-base/shared"
 	o.map_name = "ctf_Ash"
 	o.name = "Major"
+	o.port = net.DEFAULT_PORT
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		next := i + 1 < len(args) ? args[i + 1] : ""
@@ -176,9 +180,12 @@ parse_options :: proc() -> (o: Options, d: Debug) {
 		case "-base":   o.base = next; i += 1
 		case "-map":    o.map_name = next; i += 1
 		case "-join":   o.join = next; i += 1
+		case "-port":   o.port = u16(strconv.parse_int(next) or_else net.DEFAULT_PORT); i += 1
+		case "-interp-ticks": o.interp_ticks = strconv.parse_int(next) or_else 0; i += 1
 		case "-window": o.windowed = true
 		case "-name":   o.name = next; i += 1
 		case "-bot":    o.bot = true
+		case "-dodge":  o.dodge = true
 		case "-ping":   o.ping, _ = strconv.parse_f64(next); i += 1
 		case "-jitter": o.jitter, _ = strconv.parse_f64(next); i += 1
 		case "-loss":   o.loss, _ = strconv.parse_f64(next); i += 1

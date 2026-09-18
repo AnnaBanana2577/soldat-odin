@@ -231,7 +231,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 	dists: [MAX_PLAYERS]f32
 	count := 0
 	for i in 0 ..< MAX_PLAYERS {
-		s := &soldiers[i]
+		s := target_soldier(w, soldiers, b.owner, i)
 		if !s.active || s.dead || i == int(b.hit_body) do continue // TODO corpses are targets too (ragdoll)
 		if i == int(b.owner) && b.timeout >= owner_vulnerable_after do continue
 		d := vec2_dot(b.pos - s.pos, b.pos - s.pos)
@@ -247,7 +247,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 	radius: f32 = b.style == .Frag_Grenade ? PART_RADIUS + 1 : PART_RADIUS
 	for c in 0 ..< count {
 		ti := order[c]
-		target := &soldiers[ti]
+		target := target_soldier(w, soldiers, b.owner, ti)
 		if melee && ti == int(b.owner) do continue
 
 		start, end: Vec2

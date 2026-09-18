@@ -19,7 +19,8 @@ Game :: struct {
 	map_name:  string,
 	clients:   [sim.MAX_PLAYERS]Client,
 	history:   sim.History,   // the last second of soldiers, for judging shots as their shooters saw
-	rewind:    bool,          // judge shots against that history (off only to show what it does)
+	max_rewind: u32,          // ticks: how far back a shot is judged at most; a slower shooter leads
+	next_fact: u32,           // the facts are numbered as they happen
 	snapshot:  net.Snapshot,  // the next one, its events gathering until it goes
 	sent:      ^[SENT_RING]net.Snapshot, // as sent, by tick, the bases of the deltas
 	writer:    net.Writer,
@@ -38,11 +39,20 @@ Client :: struct {
 	depth:     u8,                   // how many were waiting when this tick began
 	view_tick: u32,                  // the tick the client shows the others at
 	have:      u32,                  // the newest snapshot it holds, the base of its next delta
+	facts:     [dynamic]Queued_Fact, // the server's decisions it has not acknowledged, oldest first
+	rewound, capped, ticks: int,     // how far back its shots were judged, summed; ticks at the cap; ticks
+}
+
+// A fact on its way to a client, and the first snapshot that carried it (0: none yet).
+Queued_Fact :: struct {
+	fact:    net.Timed_Event,
+	sent_in: u32,
 }
 
 MAX_QUEUE :: 30 // commands a client may have waiting; older ones beyond this are dropped
 
-game_init :: proc(g: ^Game, base, map_name: string) {
+game_init :: proc(g: ^Game, base, map_name: string, max_rewind: u32) {
+	g.max_rewind = min(max_rewind, sim.HISTORY_TICKS - 1)
 	g.map_name = map_name
 	if level, ok := sim.level_load_file(base, map_name); ok do g.level = level
 	if anims, ok := sim.anims_load_files(base); ok do g.anims = anims
@@ -53,7 +63,6 @@ game_init :: proc(g: ^Game, base, map_name: string) {
 	sim.weapons_default(&g.ctx.weapons)
 	sim.world_init(&g.world, 1)
 	g.world.history = &g.history
-	g.rewind = true
 	g.sent = new([SENT_RING]net.Snapshot)
 	sim.round_init(&g.world.round)
 	sim.things_spawn(&g.ctx, &g.world)
@@ -134,14 +143,19 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 
 leave :: proc(g: ^Game, slot: u8) {
 	g.world.soldiers[slot].active = false
-	delete(g.clients[slot].queue)
-	g.clients[slot] = {}
-	fmt.printfln("slot %d left", slot)
+	c := &g.clients[slot]
+	fmt.printfln("slot %d left; its shots were judged %.0f ms back on average, at the cap %.0f%% of the time",
+		slot, f64(c.rewound) / f64(max(c.ticks, 1)) * 1000 / sim.TICK_RATE, 100 * f64(c.capped) / f64(max(c.ticks, 1)))
+	delete(c.queue)
+	delete(c.facts)
+	c^ = {}
 }
 
 // One tick of the world on this tick's commands, then the wounds the step reported.
 // Each soldier carries how far behind the present its client shows the others, so
-// the shots it fires this tick are judged against the soldiers of that moment.
+// the shots it fires this tick are judged against the soldiers of that moment, up to
+// the cap: a shooter further behind leads its shots by the rest, and nobody is hit
+// where it stood longer ago than the cap.
 tick :: proc(g: ^Game) {
 	cmds: [sim.MAX_PLAYERS]sim.Command
 	for &c, i in g.clients {
@@ -155,8 +169,12 @@ tick :: proc(g: ^Game) {
 			c.last.buttons -= sim.ONE_SHOT // a press counts once, however long the gap
 		}
 		cmds[i] = c.last
-		behind := g.rewind && g.world.tick > c.view_tick ? g.world.tick - c.view_tick : 0
-		g.world.soldiers[i].view_lag = u8(min(behind, sim.HISTORY_TICKS - 1))
+		behind := g.world.tick > c.view_tick ? g.world.tick - c.view_tick : 0
+		lag := min(behind, g.max_rewind)
+		g.world.soldiers[i].view_lag = u8(lag)
+		c.rewound += int(lag)
+		c.ticks += 1
+		if behind > g.max_rewind do c.capped += 1
 	}
 	sim.step(&g.ctx, &g.world, cmds[:], &g.events)
 	sim.history_record(&g.history, &g.world)
@@ -165,11 +183,21 @@ tick :: proc(g: ^Game) {
 	for i in 0 ..< reported {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, &g.world, hit, &g.events)
 	}
-	for e in sim.events_slice(&g.events) do sim.emit(&g.snapshot.events, e) // for the next snapshot
+	// the actions go in the next snapshot; the decisions into every client's queue
+	for e in sim.events_slice(&g.events) {
+		if _, action := sim.event_owner(e); action {
+			sim.emit(&g.snapshot.events, e)
+			continue
+		}
+		fact := net.Timed_Event{seq = g.next_fact, tick = g.world.tick, e = e}
+		g.next_fact += 1
+		for &c in g.clients do if c.connected do append(&c.facts, Queued_Fact{fact = fact})
+	}
 }
 
 // Every SNAPSHOT_EVERY ticks, the world as it stands to every client, each with its
-// own ack and queue depth, as a delta against the newest snapshot it says it holds.
+// own ack, queue depth and facts, as a delta against the newest snapshot it says it
+// holds. A fact leaves the queue once the client holds a snapshot that carried it.
 send_snapshots :: proc(g: ^Game, host: ^Host) {
 	if g.world.tick % net.SNAPSHOT_EVERY != 0 do return
 	snap := &g.snapshot
@@ -186,9 +214,17 @@ send_snapshots :: proc(g: ^Game, host: ^Host) {
 		snap.queue_depth = c.depth
 		base: ^net.Snapshot
 		if c.have != 0 && c.have < snap.tick && c.have + SENT_RING > snap.tick && g.sent[c.have % SENT_RING].tick == c.have do base = &g.sent[c.have % SENT_RING]
+		for len(c.facts) > 0 && c.facts[0].sent_in != 0 && c.facts[0].sent_in <= c.have do ordered_remove(&c.facts, 0)
+		facts: [net.MAX_FACTS_PER_SNAPSHOT]net.Timed_Event
+		n := min(len(c.facts), net.MAX_FACTS_PER_SNAPSHOT)
+		for k in 0 ..< n {
+			q := &c.facts[k]
+			if q.sent_in == 0 do q.sent_in = snap.tick
+			facts[k] = q.fact
+		}
 		g.writer.len = 0
 		g.writer.overflow = false
-		net.encode_snapshot(&g.writer, snap, base)
+		net.encode_snapshot(&g.writer, snap, base, facts[:n])
 		if g.writer.overflow {
 			fmt.eprintln("snapshot too large to send")
 			return

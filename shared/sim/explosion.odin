@@ -26,7 +26,7 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 
 	soldiers := targets(w, b.lag) // as the thrower saw them
 	for i in 0 ..< MAX_PLAYERS {
-		s := &soldiers[i]
+		s := target_soldier(w, soldiers, b.owner, i)
 		if !s.active || s.team == .Spectator do continue
 		if s.dead {
 			ragdoll_explosion(w, u8(i), b.pos, radius)

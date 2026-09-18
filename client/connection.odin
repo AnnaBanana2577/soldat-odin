@@ -37,6 +37,9 @@ connect :: proc(c: ^Connection, address: cstring, port: u16, name: string) -> bo
 		if enet.host_service(c.host, &event, 50) <= 0 do continue
 		#partial switch event.type {
 		case .CONNECT:
+			// ENet's throttle off for our side too, as the server does for its side
+			enet.peer_throttle_configure(c.peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
+			c.peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
 			w: net.Writer
 			net.encode_hello(&w, name)
 			conn_send(c, net.writer_bytes(&w), reliable = true)

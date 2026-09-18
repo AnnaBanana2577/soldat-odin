@@ -30,7 +30,7 @@ Options :: struct {
 	base:     string,
 	map_name: string,
 	port:     u16,
-	no_rewind: bool, // judge shots against the present, to show what the rewind does
+	max_rewind_ms: int, // how far back a shot is judged at most (0: not at all, shooters lead)
 }
 
 server: Server
@@ -45,8 +45,7 @@ init :: proc() {
 	server.options = parse_options()
 	o := &server.options
 	host_open(&server.host, o.port)
-	game_init(&server.game, o.base, o.map_name)
-	server.game.rewind = !o.no_rewind
+	game_init(&server.game, o.base, o.map_name, u32(o.max_rewind_ms * sim.TICK_RATE / 1000))
 	server.last = time.tick_now()
 }
 
@@ -71,6 +70,7 @@ parse_options :: proc() -> (o: Options) {
 	o.base = "../opensoldat-base/shared"
 	o.map_name = "ctf_Ash"
 	o.port = 23073
+	o.max_rewind_ms = 150
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		next := i + 1 < len(args) ? args[i + 1] : ""
@@ -78,7 +78,7 @@ parse_options :: proc() -> (o: Options) {
 		case "-base": o.base = next; i += 1
 		case "-map":  o.map_name = next; i += 1
 		case "-port": o.port = u16(strconv.parse_int(next) or_else 23073); i += 1
-		case "-no-rewind": o.no_rewind = true
+		case "-max-rewind": o.max_rewind_ms = strconv.parse_int(next) or_else 150; i += 1
 		}
 	}
 	return

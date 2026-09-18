@@ -12,10 +12,11 @@ import "../shared/sim"
 // Each part is a quad pinned between two skeleton points: it sits at p1, rotates to
 // face p2, and is offset so the sprite's normalized point (cx, cy) lands on p1. Some
 // parts stretch along their length (flex), most have a mirrored image for facing
-// left, most have a team-2 variant. Table order is draw order. Weapons, accessories,
-// the wounded overlays and the corpse variants are more entries of the same shape.
+// left, most have a team-2 variant. Table order is draw order. The wounds (ranny/)
+// follow the part each covers and show as health runs low. Weapons, accessories and
+// the corpse variants are more entries of the same shape.
 
-Gostek_Color :: enum u8 { None, Main, Pants, Skin, Hair }
+Gostek_Color :: enum u8 { None, Main, Pants, Skin, Hair, Head_Blood }
 
 Gostek_Part :: struct {
 	file:   string, // base name under gostek-gfx
@@ -27,30 +28,47 @@ Gostek_Part :: struct {
 	color:  Gostek_Color,
 	jets:   bool,   // drawn only while jetting (replaces the matching foot)
 	foot:   bool,   // hidden while jetting
+	blood:  bool,   // a wound over the part before it, shown as health runs low
+	grip:   bool,   // the held weapon goes just before it, so the arm wraps the grip
 }
 
 GOSTEK_PARTS := [?]Gostek_Part{
-	{file = "udo",       p1 = 6,  p2 = 3,  cx = 0.2,  cy = 0.5,  flex = 5, flip = true, team = true, color = .Pants},
-	{file = "stopa",     p1 = 2,  p2 = 18, cx = 0.35, cy = 0.35, flip = true, team = true, foot = true},
-	{file = "lecistopa", p1 = 2,  p2 = 18, cx = 0.35, cy = 0.35, flip = true, team = true, jets = true},
-	{file = "noga",      p1 = 3,  p2 = 2,  cx = 0.15, cy = 0.55, flip = true, team = true, color = .Pants},
-	{file = "ramie",     p1 = 11, p2 = 14, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Main},
-	{file = "reka",      p1 = 14, p2 = 15, cx = 0,    cy = 0.5,  flex = 5, team = true, color = .Main},
-	{file = "dlon",      p1 = 15, p2 = 19, cx = 0,    cy = 0.4,  flip = true, team = true, color = .Skin},
-	{file = "udo",       p1 = 5,  p2 = 4,  cx = 0.2,  cy = 0.65, flex = 5, flip = true, team = true, color = .Pants},
-	{file = "stopa",     p1 = 1,  p2 = 17, cx = 0.35, cy = 0.35, flip = true, team = true, foot = true},
-	{file = "lecistopa", p1 = 1,  p2 = 17, cx = 0.35, cy = 0.35, flip = true, team = true, jets = true},
-	{file = "noga",      p1 = 4,  p2 = 1,  cx = 0.15, cy = 0.55, flip = true, team = true, color = .Pants},
-	{file = "klata",     p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, color = .Main},
-	{file = "biodro",    p1 = 5,  p2 = 6,  cx = 0.25, cy = 0.6,  flip = true, team = true, color = .Main},
-	{file = "morda",     p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Skin},
-	{file = "ramie",     p1 = 10, p2 = 13, cx = 0,    cy = 0.6,  flip = true, team = true, color = .Main},
-	{file = "reka",      p1 = 13, p2 = 16, cx = 0,    cy = 0.6,  flex = 5, team = true, color = .Main},
-	{file = "dlon",      p1 = 16, p2 = 20, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Skin},
+	{file = "udo",         p1 = 6,  p2 = 3,  cx = 0.2,  cy = 0.5,  flex = 5, flip = true, team = true, color = .Pants},
+	{file = "ranny/udo",   p1 = 6,  p2 = 3,  cx = 0.2,  cy = 0.5,  flex = 5, flip = true, team = true, blood = true},
+	{file = "stopa",       p1 = 2,  p2 = 18, cx = 0.35, cy = 0.35, flip = true, team = true, foot = true},
+	{file = "lecistopa",   p1 = 2,  p2 = 18, cx = 0.35, cy = 0.35, flip = true, team = true, jets = true},
+	{file = "noga",        p1 = 3,  p2 = 2,  cx = 0.15, cy = 0.55, flip = true, team = true, color = .Pants},
+	{file = "ranny/noga",  p1 = 3,  p2 = 2,  cx = 0.15, cy = 0.55, flip = true, team = true, blood = true},
+	{file = "ramie",       p1 = 11, p2 = 14, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Main},
+	{file = "ranny/ramie", p1 = 11, p2 = 14, cx = 0,    cy = 0.5,  flip = true, team = true, blood = true},
+	{file = "reka",        p1 = 14, p2 = 15, cx = 0,    cy = 0.5,  flex = 5, team = true, color = .Main},
+	{file = "ranny/reka",  p1 = 14, p2 = 15, cx = 0,    cy = 0.5,  flex = 5, flip = true, team = true, blood = true},
+	{file = "dlon",        p1 = 15, p2 = 19, cx = 0,    cy = 0.4,  flip = true, team = true, color = .Skin},
+	{file = "udo",         p1 = 5,  p2 = 4,  cx = 0.2,  cy = 0.65, flex = 5, flip = true, team = true, color = .Pants},
+	{file = "ranny/udo",   p1 = 5,  p2 = 4,  cx = 0.2,  cy = 0.65, flex = 5, flip = true, team = true, blood = true},
+	{file = "stopa",       p1 = 1,  p2 = 17, cx = 0.35, cy = 0.35, flip = true, team = true, foot = true},
+	{file = "lecistopa",   p1 = 1,  p2 = 17, cx = 0.35, cy = 0.35, flip = true, team = true, jets = true},
+	{file = "noga",        p1 = 4,  p2 = 1,  cx = 0.15, cy = 0.55, flip = true, team = true, color = .Pants},
+	{file = "ranny/noga",  p1 = 4,  p2 = 1,  cx = 0.15, cy = 0.55, flip = true, team = true, blood = true},
+	{file = "klata",       p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, color = .Main},
+	{file = "ranny/klata", p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, blood = true},
+	{file = "biodro",      p1 = 5,  p2 = 6,  cx = 0.25, cy = 0.6,  flip = true, team = true, color = .Main},
+	{file = "ranny/biodro", p1 = 5, p2 = 6,  cx = 0.25, cy = 0.6,  flip = true, team = true, blood = true},
+	{file = "morda",       p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Skin},
+	{file = "ranny/morda", p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Head_Blood, blood = true},
+	{file = "ramie",       p1 = 10, p2 = 13, cx = 0,    cy = 0.6,  flip = true, team = true, color = .Main, grip = true},
+	{file = "ranny/ramie", p1 = 10, p2 = 13, cx = -0.1, cy = 0.5,  flip = true, team = true, blood = true},
+	{file = "reka",        p1 = 13, p2 = 16, cx = 0,    cy = 0.6,  flex = 5, team = true, color = .Main},
+	{file = "ranny/reka",  p1 = 13, p2 = 16, cx = 0,    cy = 0.6,  flex = 5, flip = true, team = true, blood = true},
+	{file = "dlon",        p1 = 16, p2 = 20, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Skin},
 }
 
-// The right upper arm: the held weapon goes just before it so the arm wraps the grip.
-RIGHT_ARM_PART :: len(GOSTEK_PARTS) - 3
+// How strongly the wounds show: GostekGraphics.pas, none above 90 health, then
+// stronger the lower it goes (a corpse's is its health at death).
+blood_alpha :: proc(s: ^sim.Soldier) -> u8 {
+	if s.health > 90 do return 0
+	return u8(clamp(200 - math.round(s.health), 0, 255))
+}
 
 // Held weapons: the primary in the hands (skeleton 16 -> 15), the secondary slung
 // across the back (5 -> 10). Mirrored images are "<stem>-2.png" under weapons-gfx.
@@ -145,10 +163,12 @@ gostek_draw :: proc(g: ^Gostek, s: ^sim.Soldier, pose: ^sim.Pose, corpse: bool) 
 		draw_weapon(g, &pose, s.secondary.id, 5, 10, art.bx, art.by, facing_left)
 	}
 
+	bleeding := blood_alpha(s)
 	for part, i in GOSTEK_PARTS {
-		if i == RIGHT_ARM_PART do draw_held_weapon(g, &pose, s, facing_left)
+		if part.grip do draw_held_weapon(g, &pose, s, facing_left)
 		if part.jets && !jetting do continue
 		if part.foot && jetting do continue
+		if part.blood && bleeding == 0 do continue
 
 		mirrored := facing_left && part.flip
 		sprite := g.parts[i][part.team ? team : 0][mirrored ? 1 : 0]
@@ -167,7 +187,9 @@ gostek_draw :: proc(g: ^Gostek, s: ^sim.Soldier, pose: ^sim.Pose, corpse: bool) 
 			else do sy = -1
 		}
 		if part.flex > 0 do sx = min(1.5, sim.vec2_length(along) / part.flex)
-		draw_sprite(sprite, p1 + {0, 1}, {cx * sprite.width, cy * sprite.height}, {sx, sy}, angle, gostek_color(part.color, s))
+		tint := gostek_color(part.color, s)
+		if part.blood do tint.a = bleeding
+		draw_sprite(sprite, p1 + {0, 1}, {cx * sprite.width, cy * sprite.height}, {sx, sy}, angle, tint)
 	}
 	rlgl.SetTexture(0)
 }
@@ -216,6 +238,7 @@ gostek_color :: proc(c: Gostek_Color, s: ^sim.Soldier) -> rl.Color {
 	case .None:  return {255, 255, 255, alpha}
 	case .Skin:  return {222, 181, 140, alpha}
 	case .Hair:  return {64, 46, 31, alpha}
+	case .Head_Blood: return {172, 169, 168, alpha}
 	case .Pants: return {56, 61, 71, alpha}
 	case .Main:
 		#partial switch s.team {

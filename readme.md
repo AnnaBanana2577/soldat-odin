@@ -2,9 +2,10 @@
 
 The shape of an Odin port on raylib and ENet. The server is authoritative: clients
 send their commands, the server runs the one true world and sends it whole every
-tick; a client predicts itself by replaying its unacknowledged commands on the latest
-snapshot and shows everyone else interpolated between two older ones; the server
-judges shots against the soldiers as their shooter saw them.
+second tick; a client predicts what its own commands touch by replaying them on the
+newest snapshot, and shows everything else blended between two older snapshots; the
+server judges shots against the soldiers as their shooter saw them, up to a cap.
+This is the `interp` branch; `rollback` and `soldat-net` are the other two models.
 
 ```
 shared/sim/  the simulation, shared, one file per object: level (the map: loading,
@@ -14,9 +15,9 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), math
 shared/net/  the wire: Writer/Reader, Msg, Hello/Welcome, Input, Snapshot, Fake_Link
-client/      main (init / game_loop / cleanup), input, bot, game (reset / place others /
-             replay / effects), interp (the snapshot ring and the render clock), render,
-             audio, assets, connection, debug
+client/      main (init / game_loop / cleanup), input, bot, game (reset / replay /
+             overlay / effects), interp (the snapshot ring and the render clock),
+             render, audio, assets, connection, debug
 server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
              connection
 ```
@@ -73,9 +74,11 @@ buttons, aims at an offset from the soldier, writes the frame after two seconds 
 quits with a line of counts (-seconds N for a longer run). The debug options live in
 client/debug.odin and nowhere else. The last puts a simulated bad line between every
 client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
-in twenty lost (shared/net/fakelink.odin; reliable packets are never lost, only late).
-A bot is the client with -bot: no window, its input from client/bot.odin, so the
-server sees a player like any other.
+in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
+trip and a half later, and those behind it wait). A bot is the client with -bot: no
+window, its input from client/bot.odin, so the server sees a player like any other;
+-dodge makes it change direction and jet at random in a fight, as a person does.
+-port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires.
@@ -124,29 +127,47 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   packet so a lost one costs nothing. The server keeps a short queue per client,
   applies one command per tick (the last one again, without its one-shot buttons,
   when none has arrived), steps the whole world, applies the hits, and every second
-  tick sends every client a snapshot: every soldier, thing and bullet, the round, the
-  events since the last one, and for the receiver its last applied command and how
-  many were waiting. A snapshot goes as a delta against the newest one the client
-  says it holds: only the entities that changed, and of those only the 4-byte words
-  that changed under a mask, so a quiet tick costs a hundred bytes; a client holding
-  nothing useful gets it whole.
-  The client rebuilds its world from the newest snapshot every tick and replays its
-  pending commands on it, which predicts everything they touch: its movement, its
-  shots and their flight, its pickups, the things it holds. Everyone else and their
-  bullets are placed from two older snapshots, interpolated at a render tick that
-  runs a few ticks behind the newest, and the tick's events are applied as the render
-  tick passes them. The client runs its clock a little faster or slower to hold the
-  server's queue at a small target, and the render tick likewise to hold its
-  distance, so the two never need to agree on a clock. A correction, the server
-  putting the soldier elsewhere than predicted for the same command, is drawn as an
-  offset that blends out. Each command says which tick the client shows the others
-  at, and the server keeps the last second of soldiers so a shot meets them as its
-  shooter saw them, for as long as it flies (the server'"'"'s -no-rewind switches that off,
-  to show what it does; the run summary'"'"'s "hits seen" against "hits ruled" is the
-  measure). The state crosses the wire as the sim'"'"'s structs byte for byte, so the
-  same build must run on both ends; the hello carries the layout and a mismatch is
-  refused. A dead soldier'"'"'s state says how it died, so a corpse starts from any
-  snapshot and a lost one loses nothing.
+  tick sends every client a snapshot: every soldier, thing and bullet, the round,
+  the actions since the last one, and for the receiver its last applied command, how
+  many were waiting, and its facts. A snapshot goes as a delta against the newest
+  one the client says it holds: only the entities that changed, and of those only
+  the 4-byte words that changed under a mask, so a quiet tick costs a hundred bytes;
+  a client holding nothing useful gets it whole.
+  - What happened comes two ways. The players' actions (a shot, a wall hit, blood)
+    are told once, in the snapshot of their tick: a lost one loses a spark. What only
+    the server decides (a wound, a kill, a respawn, a pickup, a score) is a fact,
+    numbered per client and carried in every snapshot until one that carried it is
+    acknowledged, so none is ever lost. sim.event_owner tells the two apart, and the
+    same test tells the client which effects to take from its own prediction.
+  - The client rebuilds its world every tick by one rule (client/game.odin): the
+    world is the newest snapshot; its pending commands are replayed on it, stepping
+    the whole world, which predicts everything they touch (its movement, its shots
+    and their flight, its pickups, the things it holds or let go of); then everything
+    that is not its own is overwritten with the world as shown, blended between the
+    two snapshots around a render tick a few ticks behind the newest. What is its own
+    is one test, `mine`: its soldier, its bullets, the things it holds or let go of.
+    Everything else is the server's word, never guessed and never corrected; a
+    correction of its own soldier (the server put it elsewhere than predicted for the
+    same command) is drawn as an offset that blends out.
+  - The client runs its clock a little faster or slower to hold the server's queue
+    at a small target, and the render tick likewise to hold its distance behind the
+    newest snapshot, so the two never need to agree on a clock. That distance follows
+    the jitter: each newest snapshot should arrive at least three ticks ahead of the
+    render tick (the earliest of the last two seconds sets it), so there is always one
+    past it to blend toward; -interp-ticks N fixes it, to compare.
+  - Each command says which tick the client shows the others at, and the server keeps
+    the last second of soldiers so a shot meets them as its shooter saw them, for as
+    long as it flies, up to a cap (-max-rewind MS, 150 by default): inside it every
+    shot lands where it was aimed; a shooter further behind leads by the rest, and
+    nobody is hit where it stood longer ago than the cap. A thrower stands where it is
+    now, not rewound, so it does not stand in its own blast on the server alone. The
+    server's leave line says how far back a client's shots were judged on average, and
+    how often the cap applied. The run summary's "hits seen" against "hits ruled" is
+    the measure of the rewind.
+  - The state crosses the wire as the sim's structs byte for byte, so the same build
+    must run on both ends; the hello carries the layout and a mismatch is refused. A
+    dead soldier's state says how it died, so a corpse starts from any snapshot and a
+    lost one loses nothing.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg

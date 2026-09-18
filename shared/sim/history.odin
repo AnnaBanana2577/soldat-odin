@@ -29,3 +29,11 @@ targets :: proc(w: ^World, lag: u8) -> ^[MAX_PLAYERS]Soldier {
 	if h == nil || lag == 0 || u32(lag) >= h.count || u32(lag) > w.tick do return &w.soldiers
 	return &h.frames[(w.tick - u32(lag)) % HISTORY_TICKS]
 }
+
+// One of the soldiers a bullet meets, out of the frame `targets` gave. Its own shooter
+// is the exception: a client sees the others its lag ago but itself where it is, so
+// the shooter is taken from the present. Rewound with the rest, a thrower who backed
+// off from its grenade stood in the blast on the server alone.
+target_soldier :: proc(w: ^World, frame: ^[MAX_PLAYERS]Soldier, owner: u8, i: int) -> ^Soldier {
+	return i == int(owner) ? &w.soldiers[i] : &frame[i]
+}

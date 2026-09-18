@@ -5,9 +5,10 @@ import "../sim"
 
 // A simulated bad line for testing, on one side of a connection: every packet it
 // sends or receives waits the one-way delay plus a random share of the jitter, and
-// unreliable ones are lost at the loss rate. Reliable packets are never lost and
-// never overtake each other, as ENet delivers them; unreliable ones may arrive out
-// of order, as they do on a real line.
+// unreliable ones are lost at the loss rate. A reliable one lost at that rate is
+// resent, as ENet does, about a round trip and a half later; reliable packets never
+// overtake each other, so everything behind a resend waits for it. Unreliable ones
+// may arrive out of order, as they do on a real line.
 Fake_Link :: struct {
 	on:       bool,
 	one_way:  time.Duration,
@@ -45,6 +46,7 @@ fake_destroy :: proc(l: ^Fake_Link) {
 fake_hold :: proc(l: ^Fake_Link, queue: ^[dynamic]Held, last_reliable: ^time.Tick, data: []u8, reliable: bool) -> bool {
 	if !reliable && sim.rand_f32(&l.rng) < l.loss do return false
 	delay := l.one_way + time.Duration(sim.rand_f32(&l.rng) * f32(l.jitter))
+	if reliable && sim.rand_f32(&l.rng) < l.loss do delay += 3 * l.one_way // lost: resent after ENet's timeout
 	due := time.Tick{_nsec = time.tick_now()._nsec + i64(delay)}
 	if reliable {
 		if due._nsec < last_reliable._nsec do due = last_reliable^

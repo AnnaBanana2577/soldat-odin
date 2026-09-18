@@ -126,6 +126,12 @@ decode_input :: proc(r: ^Reader) -> (m: Input, ok: bool) {
 // server applied; `queue_depth` how many of its commands were waiting when the tick
 // began, which the client steers toward a small target by running its clock faster
 // or slower. `base` is the tick this one was sent as a delta against, 0 for whole.
+//
+// What happened comes two ways. The players' actions (a shot, a wall hit, blood) are
+// told once, in the snapshot of their tick: a lost one loses a spark. What only the
+// server decides (a wound, a kill, a respawn, a pickup, a score) is a fact, numbered
+// per client and carried in every snapshot until one that carried it is
+// acknowledged, so none is ever lost. sim.event_owner tells the two apart.
 Snapshot :: struct {
 	tick:        u32,
 	base:        u32,
@@ -136,12 +142,23 @@ Snapshot :: struct {
 	things:      [sim.MAX_THINGS]sim.Thing,
 	bullets:     [sim.MAX_BULLETS]sim.Bullet,
 	events:      sim.Events,
+	facts:       [MAX_FACTS_PER_SNAPSHOT]Timed_Event,
+	fact_count:  int,
 }
+
+// An event with the tick it happened at, and for a fact its number.
+Timed_Event :: struct {
+	seq:  u32,
+	tick: u32,
+	e:    sim.Event,
+}
+
+MAX_FACTS_PER_SNAPSHOT :: 32
 
 // Against `base` when there is one: an entity present in both goes as its changed
 // words, one new to this snapshot whole, one gone from it by index; the rest are not
 // mentioned and the receiver keeps its copy. Without a base everything goes whole.
-encode_snapshot :: proc(w: ^Writer, m: ^Snapshot, base: ^Snapshot) {
+encode_snapshot :: proc(w: ^Writer, m: ^Snapshot, base: ^Snapshot, facts: []Timed_Event) {
 	write_u8(w, u8(Msg.Snapshot))
 	write_u32(w, m.tick)
 	write_u32(w, base != nil ? base.tick : 0)
@@ -203,6 +220,8 @@ encode_snapshot :: proc(w: ^Writer, m: ^Snapshot, base: ^Snapshot) {
 
 	write_u16(w, u16(m.events.count))
 	for i in 0 ..< m.events.count do write_raw(w, &m.events.items[i], size_of(sim.Event))
+	write_u8(w, u8(len(facts)))
+	for &f in facts do write_raw(w, &f, size_of(Timed_Event))
 }
 
 // The header alone: which base the rest needs.
@@ -266,5 +285,7 @@ decode_snapshot :: proc(r: ^Reader, m: ^Snapshot, tick, base_tick: u32, base: ^S
 
 	m.events.count = min(int(read_u16(r)), sim.MAX_EVENTS)
 	for i in 0 ..< m.events.count do read_raw(r, &m.events.items[i], size_of(sim.Event))
+	m.fact_count = min(int(read_u8(r)), MAX_FACTS_PER_SNAPSHOT)
+	for i in 0 ..< m.fact_count do read_raw(r, &m.facts[i], size_of(Timed_Event))
 	return r.ok
 }

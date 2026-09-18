@@ -14,12 +14,15 @@ Bot :: struct {
 	stuck:    int, // ticks spent trying to move without getting anywhere
 	last_x:   f32,
 	rng:      u64,
+	dodge:    bool, // -dodge: in a fight, change direction and jet at random, as a person does
+	strafe:   int,  // -1, 0 or 1: the dodge now
+	strafe_left: int, // ticks until the next change
 }
 
 BOT_FIRE_RANGE :: 650.0
 
-bot_init :: proc(b: ^Bot, me: u8) {
-	b^ = {me = me, rng = u64(time.now()._nsec) | 1}
+bot_init :: proc(b: ^Bot, me: u8, dodge: bool) {
+	b^ = {me = me, dodge = dodge, rng = u64(time.now()._nsec) | 1}
 }
 
 bot_input :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
@@ -44,6 +47,7 @@ bot_input :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 					b.stuck = 0
 				}
 			}
+			if b.dodge && dist < BOT_FIRE_RANGE do bot_dodge(b, &held)
 			in_.aim = target.pos + {(sim.rand_f32(&b.rng) * 2 - 1) * 10, -8 + (sim.rand_f32(&b.rng) * 2 - 1) * 8}
 			if dist < BOT_FIRE_RANGE && s.cease_fire_counter < 0 {
 				_, blocked := sim.ray_cast(ctx.level, s.pos - {0, 8}, target.pos - {0, 8}, BOT_FIRE_RANGE, {bullet = true, team = s.team})
@@ -57,6 +61,21 @@ bot_input :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 	}
 	b.last_x = s.pos.x
 	in_.held = held
+}
+
+// Left, right or still, jumping and jetting, each for a few ticks at random: the moves
+// a guess from the last keys gets wrong.
+bot_dodge :: proc(b: ^Bot, held: ^sim.Buttons) {
+	b.strafe_left -= 1
+	if b.strafe_left <= 0 {
+		b.strafe = sim.rand_int(&b.rng, 3) - 1
+		b.strafe_left = 6 + sim.rand_int(&b.rng, 20)
+		if sim.rand_int(&b.rng, 3) == 0 do b.jet_hold = 4 + sim.rand_int(&b.rng, 14)
+		if sim.rand_int(&b.rng, 4) == 0 do held^ += {.Jump}
+	}
+	held^ -= {.Left, .Right}
+	if b.strafe < 0 do held^ += {.Left}
+	if b.strafe > 0 do held^ += {.Right}
 }
 
 bot_nearest_enemy :: proc(w: ^sim.World, me: u8) -> (target: ^sim.Soldier, dist: f32) {
