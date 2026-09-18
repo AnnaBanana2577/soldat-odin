@@ -1,6 +1,7 @@
-package client
+#+private
+package game
 
-import "../shared/net"
+import "../../shared/net"
 
 // The snapshots as they arrive, and the delayed clock the others are shown on.
 //

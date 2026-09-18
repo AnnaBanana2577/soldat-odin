@@ -1,35 +1,36 @@
-// The client. Reads as the loop it is:
+// The client. Reads as what it is: each subsystem opened, the loop, each closed.
 //
-//   init
-//   while running:
-//     sample input
-//     tick accumulator:
-//       process server messages
-//       simulate
-//       send to server
-//       clear input
-//     interpolate
-//     draw
-//   cleanup
+//   connection   the link to the server (connection/)
+//   game         the world: snapshots, my prediction, everyone else shown late (game/)
+//   input        the keys and mouse, or the bot's brain (input/)
+//   render       the window's picture: camera, map, soldiers, sparks (render/)
+//   audio        the sounds (audio/)
 //
-// Everything the client is lives in App; nothing else is global.
+// Each tick: the server's news in, the world simulated, the sparks and sounds of it,
+// my commands out. Each frame: the camera follows me and the world is drawn between
+// the last two ticks. Everything the client is lives in App; nothing else is global.
 //
-//   client -join IP [-base DIR] [-map NAME] [-name NAME] [-window]
-//          [-ping MS] [-jitter MS] [-loss PERCENT] [-bot]
+//   client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N]
+//          [-ping MS] [-jitter MS] [-loss PERCENT] [-bot [-dodge]]
 //
-// The client always plays on a server: -join names it, and when it cannot be reached
-// the client quits. -ping, -jitter and -loss put a simulated bad line between this
-// client and the server, for testing. -bot runs without a window, its input from the
-// brain in bot.odin, so the server sees a player like any other. The debug options
-// are in debug.odin.
+// The client plays the map the server names. -ping, -jitter and -loss put a simulated
+// bad line between this client and the server, for testing. -bot runs without a
+// window, its input from the brain in input/bot.odin, so the server sees a player
+// like any other; -dodge makes it change direction and jet at random in a fight.
+// -interp-ticks fixes how far behind the newest snapshot the world is shown (by
+// default it follows the jitter). The debug options are in debug.odin.
 package client
 
 import "core:fmt"
 import "core:os"
 import "core:strconv"
-import "core:strings"
 import "core:time"
 import rl "vendor:raylib"
+import "audio"
+import "connection"
+import "game"
+import "input"
+import "render"
 import "../shared/net"
 import "../shared/sim"
 
@@ -39,14 +40,13 @@ MAX_FRAME :: 0.25 // a stall never turns into a burst of ticks
 App :: struct {
 	options:     Options,
 	debug:       Debug,
-	assets:      Assets,
-	meshes:      Map_Meshes,
-	conn:        Connection,
-	input:       Input,
-	bot:         Bot,
-	game:        Game,
-	sparks:      Sparks,
-	audio:       Audio,
+	conn:        connection.Connection,
+	game:        game.Game,
+	bot:         input.Bot, // before `input`: a field named after a package hides it from the fields after
+	input:       input.Input,
+	camera:      render.Camera,
+	render:      render.Render,
+	audio:       audio.Audio,
 	accumulator: f64,
 	seconds:     f64, // since the start: the wall clock the art animates on
 	last_frame:  time.Tick,
@@ -54,80 +54,67 @@ App :: struct {
 }
 
 Options :: struct {
+	base:         string,
+	join:         string,
 	port:         u16,
+	name:         string,
+	windowed:     bool,
+	bot:          bool,
+	dodge:        bool, // a bot that dodges in a fight
 	interp_ticks: int,  // how far behind the newest snapshot the world is shown; 0: by the jitter
-	base:     string,
-	map_name: string,
-	join:     string,
-	windowed: bool,
-	name:     string,
-	bot:      bool,
-	dodge:    bool, // a bot that dodges in a fight
 	ping, jitter, loss: f64, // the simulated line: round trip ms, extra ms at random, percent lost
 }
 
 app: App
 
 main :: proc() {
-	init()
-	for !should_quit() do game_loop()
-	cleanup()
-}
-
-init :: proc() {
 	app.options, app.debug = parse_options()
 	o := &app.options
 	if o.join == "" {
-		fmt.eprintln("usage: client -join IP [-base DIR] [-map NAME] [-name NAME] [-window] [-ping MS] [-jitter MS] [-loss PERCENT] [-bot]")
+		fmt.eprintln("usage: client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N] [-ping MS] [-jitter MS] [-loss PERCENT] [-bot [-dodge]]")
 		os.exit(2)
 	}
 	rl.SetTraceLogLevel(.WARNING)
-	if !o.bot {
-		rl.SetConfigFlags({.VSYNC_HINT})
-		rl.InitWindow(1280, 960, "soldat")
-		if !o.windowed do rl.ToggleBorderlessWindowed() // borderless fullscreen on the current monitor
-		audio_init(&app.audio, o.base)
-	}
-	if !assets_load(&app.assets, o.base, o.map_name, art = !o.bot) {
-		fmt.eprintfln("could not load %s from %s", o.map_name, o.base)
-		os.exit(1)
-	}
-	if !o.bot {
-		map_meshes_build(&app.meshes, &app.assets.level, app.assets.map_texture)
-		sparks_load(&app.sparks, o.base)
-	}
+	if !o.bot do open_window(o.windowed)
 
-	if !connect(&app.conn, strings.clone_to_cstring(o.join, context.temp_allocator), o.port, o.name) {
-		fmt.eprintfln("could not reach %s", o.join)
-		os.exit(1)
+	if !connection.open(&app.conn, o.join, o.port, o.name) do fail("could not reach %s", o.join)
+	connection.simulate_line(&app.conn, o.ping, o.jitter, o.loss)
+	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot, o.interp_ticks) do fail("could not load %s from %s", app.conn.map_name, o.base)
+	app.camera.zoom = 1
+	if o.bot {
+		input.bot_init(&app.bot, app.conn.slot, o.dodge)
+	} else {
+		render.init(&app.render, o.base, &app.game.level)
+		audio.init(&app.audio, o.base)
 	}
-	net.fake_init(&app.conn.fake, o.ping, o.jitter, o.loss)
-	game_init(&app.game, &app.assets.ctx, app.conn.slot, o.interp_ticks)
-	if o.bot do bot_init(&app.bot, app.conn.slot, o.dodge)
-	debug_init(&app.debug, &app.game)
+	debug_init(&app.debug, &app.game, &app.camera)
+
+	for !should_quit() do frame()
+
+	if !o.bot {
+		audio.destroy(&app.audio)
+		render.destroy(&app.render)
+		rl.CloseWindow()
+	}
+	game.destroy(&app.game)
+	connection.close(&app.conn)
 }
 
-should_quit :: proc() -> bool {
-	if app.options.bot do return app.quit || app.conn.lost
-	return app.quit || app.conn.lost || rl.WindowShouldClose()
-}
-
-game_loop :: proc() {
+// One frame: the input sampled; as many ticks as the clock owes, each the server's
+// news, the world, its sparks and sounds, and my commands; then the picture.
+frame :: proc() {
 	dt := frame_seconds()
-	if app.options.bot do bot_input(&app.bot, &app.input, app.game.ctx, &app.game.world)
-	else do sample_input(&app.input, &app.game.camera, app.debug.hold)
-	if app.debug.has_aim do app.input.aim = app.game.camera.pos + app.debug.aim
+	sample_input()
 	app.accumulator = min(app.accumulator + dt * app.game.time_scale, MAX_FRAME)
 	for app.accumulator >= TICK {
-		process_server_messages(&app.game, &app.conn)
-		simulate(&app.game, &app.input)
+		game.receive(&app.game, &app.conn)
+		game.simulate(&app.game, &app.input)
 		if !app.options.bot {
-			for e in sim.events_slice(&app.game.events) do sparks_event(&app.sparks, e, &app.game.world.soldiers)
-			sparks_update(&app.sparks, &app.assets.level)
-			audio_tick(&app.audio, &app.game)
+			render.tick(&app.render, &app.game)
+			audio.tick(&app.audio, &app.game, app.camera.pos)
 		}
-		send_to_server(&app.game, &app.conn)
-		clear_input(&app.input)
+		game.send(&app.game, &app.conn)
+		input.clear(&app.input)
 		app.accumulator -= TICK
 	}
 	app.seconds += dt
@@ -135,13 +122,43 @@ game_loop :: proc() {
 		time.sleep(time.Duration((TICK - app.accumulator) * 1e9)) // nothing to draw: sleep until the next tick
 	} else {
 		alpha := f32(app.accumulator / TICK)
-		m := rl.GetMousePosition()
-		cursor := sim.Vec2{m.x, m.y}
-		if app.debug.has_aim do cursor = screen_center() + app.debug.aim * pixels_per_unit(&app.game.camera)
-		interpolate(&app.game, alpha, dt, cursor)
-		draw(&app.game, &app.assets, &app.meshes, &app.sparks, alpha, app.seconds)
+		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
+		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
 	}
 	debug_frame(&app.debug, dt)
+}
+
+// This frame's input: the bot's brain, or the keys and the cursor in the world.
+sample_input :: proc() {
+	if app.options.bot {
+		input.bot_sample(&app.bot, &app.input, &app.game.ctx, &app.game.world)
+		return
+	}
+	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold)
+	if app.debug.has_aim do app.input.aim = app.camera.pos + app.debug.aim
+}
+
+// The mouse on the screen, or where a debug option holds it.
+cursor :: proc() -> sim.Vec2 {
+	if app.debug.has_aim do return render.screen_center() + app.debug.aim * render.pixels_per_unit(&app.camera)
+	m := rl.GetMousePosition()
+	return {m.x, m.y}
+}
+
+should_quit :: proc() -> bool {
+	if app.options.bot do return app.quit || app.conn.lost
+	return app.quit || app.conn.lost || rl.WindowShouldClose()
+}
+
+open_window :: proc(windowed: bool) {
+	rl.SetConfigFlags({.VSYNC_HINT})
+	rl.InitWindow(1280, 960, "soldat")
+	if !windowed do rl.ToggleBorderlessWindowed() // borderless fullscreen on the current monitor
+}
+
+fail :: proc(format: string, args: ..any) -> ! {
+	fmt.eprintfln(format, ..args)
+	os.exit(1)
 }
 
 // The wall clock between frames, from our own timer: the sim runs on it, so it must
@@ -154,23 +171,8 @@ frame_seconds :: proc() -> f64 {
 	return dt
 }
 
-cleanup :: proc() {
-	disconnect(&app.conn)
-	game_destroy(&app.game)
-	if !app.options.bot {
-		sparks_unload(&app.sparks)
-		map_meshes_unload(&app.meshes)
-	}
-	assets_unload(&app.assets)
-	if !app.options.bot {
-		audio_destroy(&app.audio)
-		rl.CloseWindow()
-	}
-}
-
 parse_options :: proc() -> (o: Options, d: Debug) {
 	o.base = "../opensoldat-base/shared"
-	o.map_name = "ctf_Ash"
 	o.name = "Major"
 	o.port = net.DEFAULT_PORT
 	args := os.args[1:]
@@ -178,14 +180,13 @@ parse_options :: proc() -> (o: Options, d: Debug) {
 		next := i + 1 < len(args) ? args[i + 1] : ""
 		switch args[i] {
 		case "-base":   o.base = next; i += 1
-		case "-map":    o.map_name = next; i += 1
 		case "-join":   o.join = next; i += 1
 		case "-port":   o.port = u16(strconv.parse_int(next) or_else net.DEFAULT_PORT); i += 1
-		case "-interp-ticks": o.interp_ticks = strconv.parse_int(next) or_else 0; i += 1
-		case "-window": o.windowed = true
 		case "-name":   o.name = next; i += 1
+		case "-window": o.windowed = true
 		case "-bot":    o.bot = true
 		case "-dodge":  o.dodge = true
+		case "-interp-ticks": o.interp_ticks = strconv.parse_int(next) or_else 0; i += 1
 		case "-ping":   o.ping, _ = strconv.parse_f64(next); i += 1
 		case "-jitter": o.jitter, _ = strconv.parse_f64(next); i += 1
 		case "-loss":   o.loss, _ = strconv.parse_f64(next); i += 1

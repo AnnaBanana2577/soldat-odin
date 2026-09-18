@@ -1,7 +1,7 @@
-package client
+package input
 
 import "core:time"
-import "../shared/sim"
+import "../../shared/sim"
 
 // A bot's brain, for testing: what a client sees, turned into this tick's input. It
 // runs toward the nearest living enemy, jets when the target is above, jumps when it
@@ -25,7 +25,7 @@ bot_init :: proc(b: ^Bot, me: u8, dodge: bool) {
 	b^ = {me = me, dodge = dodge, rng = u64(time.now()._nsec) | 1}
 }
 
-bot_input :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
+bot_sample :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 	b.tick += 1
 	s := &w.soldiers[b.me]
 	held: sim.Buttons
@@ -65,6 +65,7 @@ bot_input :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 
 // Left, right or still, jumping and jetting, each for a few ticks at random: the moves
 // a guess from the last keys gets wrong.
+@(private = "file")
 bot_dodge :: proc(b: ^Bot, held: ^sim.Buttons) {
 	b.strafe_left -= 1
 	if b.strafe_left <= 0 {
@@ -78,6 +79,7 @@ bot_dodge :: proc(b: ^Bot, held: ^sim.Buttons) {
 	if b.strafe > 0 do held^ += {.Right}
 }
 
+@(private = "file")
 bot_nearest_enemy :: proc(w: ^sim.World, me: u8) -> (target: ^sim.Soldier, dist: f32) {
 	s := &w.soldiers[me]
 	dist = max(f32)

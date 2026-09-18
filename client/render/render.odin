@@ -1,59 +1,58 @@
-package client
+package render
 
 import "core:math"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
-import "../shared/sim"
+import "../game"
+import "../../shared/sim"
 
-GAME_HEIGHT :: 480.0 // the original's view: 480 units tall, the width follows the window
-
-Camera :: struct {
-	pos:  sim.Vec2,
-	zoom: f32,
+// Everything drawn: the art read once (the map's texture and scenery, the gostek,
+// the bullets and things), the map's polygons as meshes, and the sparks, the one part
+// with a life of its own (tick). Draws the game as it stands; changes nothing in it.
+Render :: struct {
+	level:       ^sim.Level, // the game's
+	map_texture: rl.Texture2D,   // id 0 draws the polygons untextured
+	scenery:     []rl.Texture2D, // one per entry in Level.scenery, id 0 where it failed to load
+	meshes:      Map_Meshes,
+	gostek:      Gostek,
+	bullet_art:  Bullet_Art,
+	things_art:  Things_Art,
+	sparks:      Sparks,
 }
 
-CAMERA_SPEED    :: 0.14 // the share of the distance to the target closed per tick
-CAMERA_AIM_DIST :: 7.0  // the cursor's lead: the view slides toward where you aim
-
-// The camera chases the soldier and leads toward the cursor, as the original does,
-// per frame at the frame's dt so it feels the same at any frame rate.
-camera_follow :: proc(c: ^Camera, target: sim.Vec2, cursor: sim.Vec2, dt: f64) {
-	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
-	game_w, game_h := f32(GAME_HEIGHT) * w / h, f32(GAME_HEIGHT)
-	off := sim.Vec2{
-		clamp((cursor.x - w / 2) * game_w / w, -game_w / 2, game_w / 2),
-		clamp((cursor.y - h / 2) * game_h / h, -game_h / 2, game_h / 2),
-	}
-	factor := 2 * 640 / game_w - 1 // the original's wide-screen term
-	ticks := f32(dt) * sim.TICK_RATE
-	k := 1 - math.pow(1 - CAMERA_SPEED, ticks)
-	c.pos.x += (target.x - c.pos.x) * k + c.zoom * off.x / CAMERA_AIM_DIST * factor * ticks
-	c.pos.y += (target.y - c.pos.y) * k + c.zoom * off.y / CAMERA_AIM_DIST * ticks
+// The art for the game's map, from `base`. The window must be open.
+init :: proc(r: ^Render, base: string, level: ^sim.Level) {
+	r.level = level
+	r.map_texture = map_texture_load(base, level.texture)
+	r.scenery = scenery_load(base, level.scenery)
+	map_meshes_build(&r.meshes, level, r.map_texture)
+	gostek_load(&r.gostek, base)
+	bullet_art_load(&r.bullet_art, base)
+	things_art_load(&r.things_art, base)
+	sparks_load(&r.sparks, base)
 }
 
-screen_to_world :: proc(c: ^Camera, p: sim.Vec2) -> sim.Vec2 {
-	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
-	view_h := GAME_HEIGHT * c.zoom
-	view_w := view_h * w / h
-	return {c.pos.x - view_w / 2 + p.x * view_w / w, c.pos.y - view_h / 2 + p.y * view_h / h}
+destroy :: proc(r: ^Render) {
+	sparks_unload(&r.sparks)
+	things_art_unload(&r.things_art)
+	bullet_art_unload(&r.bullet_art)
+	gostek_unload(&r.gostek)
+	map_meshes_unload(&r.meshes)
+	for t in r.scenery do if t.id != 0 do rl.UnloadTexture(t)
+	delete(r.scenery)
+	if r.map_texture.id != 0 do rl.UnloadTexture(r.map_texture)
 }
 
-screen_center :: proc() -> sim.Vec2 {
-	return {f32(rl.GetScreenWidth()) / 2, f32(rl.GetScreenHeight()) / 2}
-}
-
-pixels_per_unit :: proc(c: ^Camera) -> f32 {
-	return f32(rl.GetScreenHeight()) / (GAME_HEIGHT * c.zoom)
-}
-
-rl_camera :: proc(c: ^Camera) -> rl.Camera2D {
-	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
-	return {offset = {w / 2, h / 2}, target = {c.pos.x, c.pos.y}, zoom = h / (GAME_HEIGHT * c.zoom)}
+// Once per tick: this tick's bursts, and every spark on.
+tick :: proc(r: ^Render, g: ^game.Game) {
+	for e in sim.events_slice(&g.events) do sparks_event(&r.sparks, e, &g.world.soldiers)
+	sparks_update(&r.sparks, r.level)
 }
 
 // The map's polygons as two static meshes built once: the background polys, drawn
 // first, and the solid terrain, drawn after the players so it occludes them (the
 // original's order). Both carry the map texture with per-vertex colour.
+@(private)
 Map_Meshes :: struct {
 	background: rl.Mesh,
 	terrain:    rl.Mesh,
@@ -61,6 +60,7 @@ Map_Meshes :: struct {
 	built:      bool,
 }
 
+@(private)
 map_meshes_build :: proc(m: ^Map_Meshes, level: ^sim.Level, texture: rl.Texture2D) {
 	m.background = build_poly_mesh(level, background = true)
 	m.terrain = build_poly_mesh(level, background = false)
@@ -69,6 +69,7 @@ map_meshes_build :: proc(m: ^Map_Meshes, level: ^sim.Level, texture: rl.Texture2
 	m.built = true
 }
 
+@(private)
 map_meshes_unload :: proc(m: ^Map_Meshes) {
 	if !m.built do return
 	rl.UnloadMesh(m.background)
@@ -111,22 +112,23 @@ build_poly_mesh :: proc(level: ^sim.Level, background: bool) -> (mesh: rl.Mesh) 
 // The frame, in the original's layer order: the sky, the background polys, scenery
 // behind, everything alive, scenery in front of it, the terrain, scenery in front of
 // the players, the sparks, then the HUD. Reads the game, changes nothing.
-draw :: proc(g: ^Game, assets: ^Assets, meshes: ^Map_Meshes, sparks: ^Sparks, alpha: f32, seconds: f64) {
+draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f64, wireframe: bool) {
+	m := &r.meshes
 	rl.BeginDrawing()
-	rl.ClearBackground(color_of(assets.level.bg_bottom))
-	rl.BeginMode2D(rl_camera(&g.camera))
+	rl.ClearBackground(color_of(r.level.bg_bottom))
+	rl.BeginMode2D(rl_camera(camera))
 	rlgl.DisableBackfaceCulling() // the map's triangles wind either way
-	draw_background(&assets.level, &g.camera)
-	if meshes.built do draw_mesh_now(meshes.background, meshes.material)
-	draw_scenery(assets, 0)
-	things_draw(&assets.things_art, &g.world, alpha, seconds)
-	draw_soldiers(g, assets, alpha)
-	bullets_draw(&assets.bullet_art, &g.world.bullets, alpha, seconds)
-	draw_scenery(assets, 1)
-	if meshes.built do draw_mesh_now(meshes.terrain, meshes.material)
-	draw_scenery(assets, 2)
-	sparks_draw(sparks)
-	if app.debug.wireframe do draw_wireframe(&assets.level)
+	draw_background(r.level, camera)
+	if m.built do draw_mesh_now(m.background, m.material)
+	draw_scenery(r, 0)
+	things_draw(&r.things_art, &g.world, alpha, seconds)
+	draw_soldiers(r, g, alpha)
+	bullets_draw(&r.bullet_art, &g.world.bullets, alpha, seconds)
+	draw_scenery(r, 1)
+	if m.built do draw_mesh_now(m.terrain, m.material)
+	draw_scenery(r, 2)
+	sparks_draw(&r.sparks)
+	if wireframe do draw_wireframe(r.level)
 	rl.EndMode2D()
 	draw_hud(g)
 	rl.EndDrawing()
@@ -134,6 +136,7 @@ draw :: proc(g: ^Game, assets: ^Assets, meshes: ^Map_Meshes, sparks: ^Sparks, al
 
 // A mesh draws at once while everything else waits in the batch, so the batch is
 // flushed first or the mesh ends up underneath what was pushed before it.
+@(private)
 draw_mesh_now :: proc(mesh: rl.Mesh, material: rl.Material) {
 	rlgl.DrawRenderBatchActive()
 	rl.DrawMesh(mesh, material, rl.Matrix(1))
@@ -141,6 +144,7 @@ draw_mesh_now :: proc(mesh: rl.Mesh, material: rl.Material) {
 
 // The sky gradient. The original anchors it in world space vertically, spanning +/-d
 // about the origin, and stretches it across the screen, so it scrolls with the camera.
+@(private)
 draw_background :: proc(level: ^sim.Level, camera: ^Camera) {
 	d := f32(sim.MAX_SECTOR) * max(f32(level.sectors_division), math.ceil(0.5 * GAME_HEIGHT / f32(sim.MAX_SECTOR)))
 	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
@@ -162,10 +166,11 @@ draw_background :: proc(level: ^sim.Level, camera: ^Camera) {
 // One layer of props. The quad reproduces the original's GfxMat3Transform: the map's
 // position is the prop's top-left, its size is the map's width and height times the
 // scale (not the image's own size), rotated about a pivot one unit below the anchor.
-draw_scenery :: proc(assets: ^Assets, layer: u8) {
-	for &prop in assets.level.props {
+@(private)
+draw_scenery :: proc(r: ^Render, layer: u8) {
+	for &prop in r.level.props {
 		if prop.level != layer || prop.style == 0 do continue
-		tex := assets.scenery[prop.style - 1]
+		tex := r.scenery[prop.style - 1]
 		if tex.id == 0 do continue
 		p0, p1, p2, p3 := prop_corners(&prop)
 		c := prop.color
@@ -186,6 +191,7 @@ draw_scenery :: proc(assets: ^Assets, layer: u8) {
 	rlgl.SetTexture(0)
 }
 
+@(private)
 prop_corners :: proc(prop: ^sim.Prop) -> (p0, p1, p2, p3: sim.Vec2) {
 	angle := -prop.rotation
 	c, s := math.cos(angle), math.sin(angle)
@@ -205,6 +211,7 @@ prop_corners :: proc(prop: ^sim.Prop) -> (p0, p1, p2, p3: sim.Vec2) {
 		corner(m0, m3, m6, m1, m4, m7, 0, h)
 }
 
+@(private)
 draw_wireframe :: proc(level: ^sim.Level) {
 	for &poly in level.polys {
 		for k in 0 ..< 3 {
@@ -216,21 +223,24 @@ draw_wireframe :: proc(level: ^sim.Level) {
 
 // The living on their animated pose at this frame's position, the dead on their
 // ragdoll's points between the last two ticks.
-draw_soldiers :: proc(g: ^Game, assets: ^Assets, alpha: f32) {
+@(private)
+draw_soldiers :: proc(r: ^Render, g: ^game.Game, alpha: f32) {
 	for &s, i in g.world.soldiers {
 		if !s.active do continue
-		r := &g.world.ragdolls[i]
+		body := &g.world.ragdolls[i]
 		// a dead soldier whose kill has not come yet holds its last pose
-		corpse := s.dead && r.active
-		pose := corpse ? sim.ragdoll_pose(r, alpha) : sim.soldier_pose(g.ctx.anims, &s, drawn_pos(g, i, alpha))
-		gostek_draw(&assets.gostek, &s, &pose, corpse)
+		corpse := s.dead && body.active
+		pose := corpse ? sim.ragdoll_pose(body, alpha) : sim.soldier_pose(g.ctx.anims, &s, game.drawn_pos(g, i, alpha))
+		gostek_draw(&r.gostek, &s, &pose, corpse)
 	}
 }
 
-draw_hud :: proc(g: ^Game) {
+@(private)
+draw_hud :: proc(g: ^game.Game) {
 	// TODO the bars, the kill feed, the weapon and ammo
 }
 
+@(private)
 color_of :: proc(c: sim.Color) -> rl.Color {
 	return {c.r, c.g, c.b, c.a}
 }

@@ -14,24 +14,32 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), math
 shared/net/  the wire: Writer/Reader, Msg, Hello/Welcome, Input, Snapshot, Fake_Link
-client/      main (init / game_loop / cleanup), input, bot, game (reset / replay /
-             overlay / effects), interp (the snapshot ring and the render clock),
-             render, audio, assets, connection, debug
+client/      main (each subsystem opened, the loop, each closed), debug, and a package
+             per subsystem:
+  connection/  the link to the server, the simulated bad line
+  game/        the world: game (reset / replay / overlay / effects), snapshots (the
+               ring and the render clock)
+  input/       input (the keys and mouse), bot (the headless brain)
+  render/      render (the frame, the map's meshes), camera, textures, gostek,
+               bullet_art, things_art, sparks, sprite
+  audio/       audio
 server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
              connection
 ```
 
-The client loop, client/main.odin:
+The client, client/main.odin:
 
 ```
-sample_input
-tick accumulator:
-  process_server_messages
-  simulate
-  send_to_server
-  clear_input
-interpolate
-draw
+connection.open, game.init, render.init, audio.init
+while running:
+  sample input                  the keys and cursor, or the bot
+  tick accumulator:
+    game.receive                the server's snapshots
+    game.simulate               the world: newest snapshot, my replay, the rest shown late
+    render.tick, audio.tick     the sparks and sounds of it
+    game.send                   my commands
+  render.camera_follow, render.draw
+audio.destroy, render.destroy, game.destroy, connection.close
 ```
 
 The server loop, server/main.odin:
@@ -59,7 +67,8 @@ odin run build.odin -file -- server         build, then the server alone
 
 The server links no raylib. The map and its art come from the opensoldat/base
 assets, expected at ../opensoldat-base/shared (-base DIR to point elsewhere, -map NAME
-for another map). Anything after a second -- goes to the program:
+for another map; the clients play the map the server names). Anything after a
+second -- goes to the program:
 
 ```
 odin run build.odin -file -- dev -- -window          in a window instead of borderless fullscreen
@@ -75,7 +84,7 @@ client/debug.odin and nowhere else. The last puts a simulated bad line between e
 client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
 in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
 trip and a half later, and those behind it wait). A bot is the client with -bot: no
-window, its input from client/bot.odin, so the server sees a player like any other;
+window, its input from client/input/bot.odin, so the server sees a player like any other;
 -dodge makes it change direction and jet at random in a fight, as a person does.
 -port N picks another port on the server and the client alike.
 
@@ -138,7 +147,7 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
     numbered per client and carried in every snapshot until one that carried it is
     acknowledged, so none is ever lost. sim.event_owner tells the two apart, and the
     same test tells the client which effects to take from its own prediction.
-  - The client rebuilds its world every tick by one rule (client/game.odin): the
+  - The client rebuilds its world every tick by one rule (client/game/game.odin): the
     world is the newest snapshot; its pending commands are replayed on it, stepping
     the whole world, which predicts everything they touch (its movement, its shots
     and their flight, its pickups, the things it holds or let go of); then everything

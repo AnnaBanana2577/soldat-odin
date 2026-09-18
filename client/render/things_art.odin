@@ -1,10 +1,11 @@
-package client
+#+private
+package render
 
 import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
-import "../shared/sim"
+import "../../shared/sim"
 
 // The things as drawn, from TThing.Render and TThing.PolygonsRender: the flag's
 // cloth is a quad stretched over its skeleton points so it flutters with the physics,

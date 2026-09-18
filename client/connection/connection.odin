@@ -1,13 +1,14 @@
-package client
+package connection
 
 import "core:fmt"
+import "core:strings"
 import "core:time"
 import enet "vendor:ENet"
-import "../shared/net"
+import "../../shared/net"
 
 // The link to the server: ENet, the handshake, and a queue of received packets that
-// process_server_messages drains once per tick, so every message is applied at a
-// tick boundary and in order.
+// the game drains once per tick, so every message is applied at a tick boundary and
+// in order. A simulated bad line (simulate_line) can sit on it, for testing.
 Connection :: struct {
 	host:     ^enet.Host,
 	peer:     ^enet.Peer,
@@ -21,12 +22,12 @@ Connection :: struct {
 CONNECT_TIMEOUT :: 4 * time.Second
 
 // Connects and completes the handshake before returning: hello up, welcome down.
-connect :: proc(c: ^Connection, address: cstring, port: u16, name: string) -> bool {
+open :: proc(c: ^Connection, address: string, port: u16, name: string) -> bool {
 	if enet.initialize() != 0 do return false
 	c.host = enet.host_create(nil, 1, net.CHANNEL_COUNT, 0, 0)
 	if c.host == nil do return false
 	addr: enet.Address
-	if enet.address_set_host(&addr, address) != 0 do return false
+	if enet.address_set_host(&addr, strings.clone_to_cstring(address, context.temp_allocator)) != 0 do return false
 	addr.port = port
 	c.peer = enet.host_connect(c.host, &addr, net.CHANNEL_COUNT, 0)
 	if c.peer == nil do return false
@@ -42,7 +43,7 @@ connect :: proc(c: ^Connection, address: cstring, port: u16, name: string) -> bo
 			c.peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
 			w: net.Writer
 			net.encode_hello(&w, name)
-			conn_send(c, net.writer_bytes(&w), reliable = true)
+			send(c, net.writer_bytes(&w), reliable = true)
 		case .RECEIVE:
 			r := net.reader_make(event.packet.data[:event.packet.dataLength])
 			kind := net.Msg(net.read_u8(&r))
@@ -66,7 +67,7 @@ connect :: proc(c: ^Connection, address: cstring, port: u16, name: string) -> bo
 	return false
 }
 
-disconnect :: proc(c: ^Connection) {
+close :: proc(c: ^Connection) {
 	if c.peer != nil do enet.peer_disconnect(c.peer, 0)
 	if c.host != nil {
 		enet.host_flush(c.host)
@@ -79,10 +80,16 @@ disconnect :: proc(c: ^Connection) {
 	enet.deinitialize()
 }
 
+// A round trip of `ping` ms, up to `jitter` more at random, `loss` percent of the
+// packets lost: between this client and the server, both ways.
+simulate_line :: proc(c: ^Connection, ping, jitter, loss: f64) {
+	net.fake_init(&c.fake, ping, jitter, loss)
+}
+
 // Pumps ENet and returns everything that arrived, oldest first. The slice is valid
 // until the next call. With the fake line on, arrivals wait their delay here and the
 // packets held back from sending go out once theirs is up.
-conn_receive :: proc(c: ^Connection) -> [][]u8 {
+receive :: proc(c: ^Connection) -> [][]u8 {
 	for p in c.inbox do delete(p)
 	clear(&c.inbox)
 	event: enet.Event
@@ -113,7 +120,7 @@ conn_receive :: proc(c: ^Connection) -> [][]u8 {
 	return c.inbox[:]
 }
 
-conn_send :: proc(c: ^Connection, data: []u8, reliable: bool) {
+send :: proc(c: ^Connection, data: []u8, reliable: bool) {
 	if c.fake.on {
 		held := make([]u8, len(data))
 		copy(held, data)
@@ -128,8 +135,4 @@ send_now :: proc(c: ^Connection, data: []u8, reliable: bool) {
 	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNRELIABLE_FRAGMENT}
 	packet := enet.packet_create(raw_data(data), len(data), flags)
 	enet.peer_send(c.peer, reliable ? net.CHANNEL_RELIABLE : net.CHANNEL_UNRELIABLE, packet)
-}
-
-round_trip_ms :: proc(c: ^Connection) -> f32 {
-	return c.peer != nil ? f32(c.peer.roundTripTime) : 0
 }

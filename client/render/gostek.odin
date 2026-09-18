@@ -1,11 +1,12 @@
-package client
+#+private
+package render
 
 import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
-import "../shared/sim"
+import "../../shared/sim"
 
 // The gostek: layered sprites pinned to the skeleton pose, from GostekGraphics.pas.
 //

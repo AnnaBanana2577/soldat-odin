@@ -1,7 +1,9 @@
-package client
+package game
 
-import "../shared/net"
-import "../shared/sim"
+import "../connection"
+import "../input"
+import "../../shared/net"
+import "../../shared/sim"
 
 // The game as this client plays it. One world, rebuilt every tick by one rule:
 //
@@ -18,8 +20,14 @@ import "../shared/sim"
 // that the next snapshot is always there to blend toward, so it is never guessed and
 // never corrected. Nothing is kept across ticks but the pending commands, the corpses
 // and the events waiting for the render clock.
+//
+// The game owns what the sim reads and never writes (the map, the animations, the
+// weapons, the things' skeletons), loaded for the map the server named.
 Game :: struct {
-	ctx:     ^sim.Context,
+	ctx:       sim.Context,
+	level:     sim.Level,
+	anims:     ^sim.Anims,
+	skeletons: ^sim.Skeletons,
 	world:   sim.World,
 	me:      u8,
 	seq:     u32, // my command count
@@ -33,7 +41,6 @@ Game :: struct {
 	next_fact: u32, // the server's decisions come numbered: the next to take
 
 	time_scale:  f64, // my tick rate against the server's, steering the queue depth
-	camera:      Camera,
 	shots_fired: int,      // ours, for the HUD
 	hits_predicted, hits_confirmed: int, // my hits as I saw them, and as the server ruled
 	my_prev:     sim.Vec2, // my position a tick ago, for drawing between ticks
@@ -49,18 +56,29 @@ PREDICTED_KEPT :: 64
 SMOOTH_DECAY   :: 0.8  // share of the offset kept per tick
 SMOOTH_SNAP    :: 60.0 // a correction this large is shown at once
 
-game_init :: proc(g: ^Game, ctx: ^sim.Context, me: u8, interp_ticks: int) {
-	g.ctx = ctx
+// The sim's data for the map, read from `base`, and an empty world for slot `me`.
+init :: proc(g: ^Game, base, map_name: string, me: u8, interp_ticks: int) -> bool {
+	ok: bool
+	if g.level, ok = sim.level_load_file(base, map_name); !ok do return false
+	if g.anims, ok = sim.anims_load_files(base); !ok do return false
+	if g.skeletons, ok = sim.skeletons_load_files(base); !ok do return false
+	g.ctx.level = &g.level
+	g.ctx.anims = g.anims
+	g.ctx.skeletons = g.skeletons
+	sim.weapons_default(&g.ctx.weapons)
 	g.me = me
 	sim.world_init(&g.world, 0)
 	sim.round_init(&g.world.round)
 	snapshots_init(&g.snaps, interp_ticks)
 	g.shown = new(net.Snapshot)
 	g.time_scale = 1
-	g.camera.zoom = 1
+	return true
 }
 
-game_destroy :: proc(g: ^Game) {
+destroy :: proc(g: ^Game) {
+	sim.level_destroy(&g.level)
+	free(g.anims)
+	free(g.skeletons)
 	delete(g.pending)
 	delete(g.timeline)
 	free(g.shown)
@@ -69,11 +87,13 @@ game_destroy :: proc(g: ^Game) {
 
 // ---- what is mine ----
 
+@(private)
 mine_soldier :: proc(g: ^Game, slot: int) -> bool { return u8(slot) == g.me }
 mine_bullet  :: proc(g: ^Game, b: ^sim.Bullet) -> bool { return b.active && b.owner == g.me }
 mine_thing   :: proc(g: ^Game, t: ^sim.Thing) -> bool { return t.style != .None && (t.holder == g.me + 1 || t.owner == g.me + 1) }
 
 // An action of mine, which my replay produced; the server's copy is skipped.
+@(private)
 mine_event :: proc(g: ^Game, e: sim.Event) -> bool {
 	owner, action := sim.event_owner(e)
 	return action && owner == g.me
@@ -85,8 +105,8 @@ mine_event :: proc(g: ^Game, e: sim.Event) -> bool {
 // checks my prediction; its queue depth sets my clock: slower with too many waiting,
 // faster with too few, and exactly the server's when the queue is near the target,
 // so ticks and frames keep step. Its events wait for the render clock.
-process_server_messages :: proc(g: ^Game, conn: ^Connection) {
-	for data in conn_receive(conn) {
+receive :: proc(g: ^Game, conn: ^connection.Connection) {
+	for data in connection.receive(conn) {
 		r := net.reader_make(data)
 		if net.Msg(net.read_u8(&r)) != .Snapshot do continue
 		snap := snapshots_receive(&g.snaps, &r)
@@ -110,9 +130,9 @@ process_server_messages :: proc(g: ^Game, conn: ^Connection) {
 
 // ---- the tick ----
 
-simulate :: proc(g: ^Game, in_: ^Input) {
+simulate :: proc(g: ^Game, in_: ^input.Input) {
 	g.seq += 1
-	append(&g.pending, command_for_tick(in_, g.seq))
+	append(&g.pending, input.command(in_, g.seq))
 	latest := snapshots_latest(&g.snaps)
 	if latest == nil do return
 
@@ -121,12 +141,13 @@ simulate :: proc(g: ^Game, in_: ^Input) {
 	replay(g)
 	snapshots_advance(&g.snaps)
 	if snapshots_shown(&g.snaps, g.shown) do overlay(g, g.shown)
-	sim.ragdolls_update(g.ctx, &g.world)
+	sim.ragdolls_update(&g.ctx, &g.world)
 	gather_effects(g)
 	g.smooth *= SMOOTH_DECAY
 }
 
 // The authoritative state over the world; the corpses and the rng are the client's own.
+@(private)
 world_reset :: proc(w: ^sim.World, snap: ^net.Snapshot) {
 	w.tick = snap.tick
 	w.round = snap.round
@@ -138,21 +159,23 @@ world_reset :: proc(w: ^sim.World, snap: ^net.Snapshot) {
 // My pending commands, oldest first, each a tick of my soldier, the things and the
 // bullets: the sim as it is. Only the newest command's step is new this tick; its
 // events are kept, the rest are re-runs of earlier ticks and theirs are thrown away.
+@(private)
 replay :: proc(g: ^Game) {
 	scratch: sim.Events
 	for cmd, i in g.pending {
 		events := i == len(g.pending) - 1 ? &g.frontier : &scratch
 		sim.events_clear(events)
-		sim.soldier_step(g.ctx, &g.world, g.me, cmd, events)
+		sim.soldier_step(&g.ctx, &g.world, g.me, cmd, events)
 		g.predicted[cmd.seq % PREDICTED_KEPT] = g.world.soldiers[g.me].pos
-		sim.things_update(g.ctx, &g.world, events)
-		sim.bullets_update(g.ctx, &g.world, events)
+		sim.things_update(&g.ctx, &g.world, events)
+		sim.bullets_update(&g.ctx, &g.world, events)
 		g.world.tick += 1 // the tick the server will run this command on
 	}
 }
 
 // Everything that is not mine, as the shown world has it. What the shown world holds
 // of mine is my own past, and my replay has the present of it: dropped.
+@(private)
 overlay :: proc(g: ^Game, shown: ^net.Snapshot) {
 	w := &g.world
 	for i in 0 ..< sim.MAX_PLAYERS {
@@ -168,6 +191,7 @@ overlay :: proc(g: ^Game, shown: ^net.Snapshot) {
 
 // This tick's effects for the sparks and sounds: my actions from my replay, and from
 // the server everything the render clock has reached, except my actions again.
+@(private)
 gather_effects :: proc(g: ^Game) {
 	sim.events_clear(&g.events)
 	for e in sim.events_slice(&g.frontier) {
@@ -199,7 +223,7 @@ gather_effects :: proc(g: ^Game) {
 
 // My newest commands, a few packets running so a lost one loses nothing, and the tick
 // I show the others at.
-send_to_server :: proc(g: ^Game, conn: ^Connection) {
+send :: proc(g: ^Game, conn: ^connection.Connection) {
 	m := net.Input{view_tick = u32(g.snaps.render_tick), have = g.snaps.any ? g.snaps.latest : 0}
 	first := max(len(g.pending) - net.MAX_COMMANDS_PER_INPUT, 0)
 	for cmd in g.pending[first:] {
@@ -208,7 +232,7 @@ send_to_server :: proc(g: ^Game, conn: ^Connection) {
 	}
 	w: net.Writer
 	net.encode_input(&w, &m)
-	conn_send(conn, net.writer_bytes(&w), reliable = false)
+	connection.send(conn, net.writer_bytes(&w), reliable = false)
 }
 
 // ---- drawing ----
@@ -222,9 +246,4 @@ drawn_pos :: proc(g: ^Game, slot: int, alpha: f32) -> sim.Vec2 {
 	}
 	if mine_soldier(g, slot) do return g.my_prev + (s.pos - g.my_prev) * alpha + g.smooth
 	return s.old_pos + (s.pos - s.old_pos) * alpha
-}
-
-// The camera chasing us; dt is the frame's seconds, for the chase.
-interpolate :: proc(g: ^Game, alpha: f32, dt: f64, cursor: sim.Vec2) {
-	camera_follow(&g.camera, drawn_pos(g, int(g.me), alpha), cursor, dt)
 }

@@ -1,4 +1,4 @@
-package client
+package audio
 
 import "core:fmt"
 import "core:math"
@@ -6,7 +6,8 @@ import "core:math/linalg"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
-import "../shared/sim"
+import "../game"
+import "../../shared/sim"
 
 // Sounds, from Sound.pas and the play sites in Sprites.pas and Bullets.pas by way of
 // the Lua port, on raylib's audio:
@@ -24,7 +25,7 @@ import "../shared/sim"
 //
 // What plays when: the events (audio_event), each soldier's state against the tick
 // before (audio_soldier), bullets passing us (audio_bullets) and the clock's beeps,
-// all from audio_tick once per tick. Corpse thuds, shell casings and the antics are
+// all from `tick` once per tick. Corpse thuds, shell casings and the antics are
 // not here yet.
 
 SOUND_MAXDIST       :: 750.0
@@ -63,7 +64,7 @@ Reserved :: struct {
 	paused: bool,
 }
 
-audio_init :: proc(a: ^Audio, base: string) {
+init :: proc(a: ^Audio, base: string) {
 	rl.InitAudioDevice()
 	a.ready = rl.IsAudioDeviceReady()
 	a.dir, _ = filepath.join({base, "sfx"})
@@ -71,7 +72,7 @@ audio_init :: proc(a: ^Audio, base: string) {
 	a.rng = 0x9E3779B1
 }
 
-audio_destroy :: proc(a: ^Audio) {
+destroy :: proc(a: ^Audio) {
 	for &per_soldier in a.voices do for &r in per_soldier do voice_release(&r)
 	for _, &s in a.samples {
 		if !s.ok do continue
@@ -83,16 +84,17 @@ audio_destroy :: proc(a: ^Audio) {
 	rl.CloseAudioDevice()
 }
 
-// Once per tick: where we listen from, then everything that sounded this tick.
-audio_tick :: proc(a: ^Audio, g: ^Game) {
+// Once per tick: where we listen from (my soldier, or the view's centre `camera` when
+// there is none), then everything that sounded this tick.
+tick :: proc(a: ^Audio, g: ^game.Game, camera: sim.Vec2) {
 	if !a.ready do return
 	me := &g.world.soldiers[g.me]
-	a.camera = g.camera.pos
+	a.camera = camera
 	a.listener = me.active ? me.pos : a.camera
 	if a.ringing > -1 do a.ringing -= 1
 	audio_clock(a, &g.world.round)
 	for e in sim.events_slice(&g.events) do audio_event(a, e, g)
-	for &s, i in g.world.soldiers do audio_soldier(a, g.ctx, u8(i), &s, g.world.tick)
+	for &s, i in g.world.soldiers do audio_soldier(a, &g.ctx, u8(i), &s, g.world.tick)
 	audio_bullets(a, g)
 }
 
@@ -257,7 +259,7 @@ distant_sample :: proc(a: ^Audio, name: string) -> string {
 
 // ---- the events ----
 
-audio_event :: proc(a: ^Audio, e: sim.Event, g: ^Game) {
+audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
 	w := &g.world
 	#partial switch v in e {
 	case sim.Fire:
@@ -508,7 +510,7 @@ audio_soldier :: proc(a: ^Audio, ctx: ^sim.Context, slot: u8, s: ^sim.Soldier, t
 // A whistle 25 ticks into any round's flight but a shotgun's, and a whiz the first time
 // another's bullet enters the box around us.
 @(private = "file")
-audio_bullets :: proc(a: ^Audio, g: ^Game) {
+audio_bullets :: proc(a: ^Audio, g: ^game.Game) {
 	me := &g.world.soldiers[g.me]
 	for &b, i in g.world.bullets {
 		if !b.active {

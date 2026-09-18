@@ -4,6 +4,8 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import rl "vendor:raylib"
+import "game"
+import "render"
 import "../shared/sim"
 
 // Everything that exists for checking the game rather than playing it, in one place
@@ -73,8 +75,8 @@ debug_option :: proc(d: ^Debug, name, value: string) -> (took_value: bool) {
 	return false
 }
 
-debug_init :: proc(d: ^Debug, g: ^Game) {
-	if d.zoom > 0 do g.camera.zoom = d.zoom
+debug_init :: proc(d: ^Debug, g: ^game.Game, camera: ^render.Camera) {
+	if d.zoom > 0 do camera.zoom = d.zoom
 	if d.screenshot != "" do d.has_aim = true // a capture never follows the real mouse
 	if d.screenshot != "" && d.seconds == 0 do d.seconds = 2
 	fmt.printfln("map %s: %d polys, %d props", g.ctx.level.name, len(g.ctx.level.polys), len(g.ctx.level.props))

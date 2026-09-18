@@ -1,11 +1,12 @@
-package client
+#+private
+package render
 
 import "core:math"
 import "core:os"
 import "core:strings"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
-import "../shared/sim"
+import "../../shared/sim"
 
 // A sprite is a texture with its size in world units, drawn as a rotated, scaled
 // quad. The gostek, the bullets and the sparks all draw through draw_sprite.

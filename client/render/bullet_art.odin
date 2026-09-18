@@ -1,11 +1,12 @@
-package client
+#+private
+package render
 
 import "core:fmt"
 import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
-import "../shared/sim"
+import "../../shared/sim"
 
 // The projectiles as drawn, from TBullet.Render in Bullets.pas. Most styles are the
 // bullet's own image at pos + vel, stretched along its length by the speed and turned

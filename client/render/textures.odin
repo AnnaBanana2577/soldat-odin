@@ -1,61 +1,14 @@
-package client
+#+private
+package render
 
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
-import "../shared/sim"
 
-// Everything loaded from disk once: the map and its texture, the scenery images the
-// map's props refer to, the animations, the gostek art, weapon stats, sprites,
-// sounds. The sim's Context points into it.
-Assets :: struct {
-	ctx:         sim.Context,
-	level:       sim.Level,
-	anims:       ^sim.Anims,
-	skeletons:   ^sim.Skeletons,
-	map_texture: rl.Texture2D,   // id 0 draws the polygons untextured
-	scenery:     []rl.Texture2D, // one per entry in Level.scenery, id 0 where it failed to load
-	gostek:      Gostek,
-	bullet_art:  Bullet_Art,
-	things_art:  Things_Art,
-}
-
-// Without `art` only what the sim needs is read: a bot has no window to draw on.
-assets_load :: proc(a: ^Assets, base: string, map_name: string, art: bool) -> bool {
-	ok: bool
-	a.level, ok = sim.level_load_file(base, map_name)
-	if !ok do return false
-	a.anims, ok = sim.anims_load_files(base)
-	if !ok do return false
-	a.skeletons, ok = sim.skeletons_load_files(base)
-	if !ok do return false
-	a.ctx.level = &a.level
-	a.ctx.anims = a.anims
-	a.ctx.skeletons = a.skeletons
-	sim.weapons_default(&a.ctx.weapons)
-	if !art do return true
-	a.map_texture = map_texture_load(base, a.level.texture)
-	a.scenery = scenery_load(base, a.level.scenery)
-	gostek_load(&a.gostek, base)
-	bullet_art_load(&a.bullet_art, base)
-	things_art_load(&a.things_art, base)
-	// TODO sounds
-	return true
-}
-
-assets_unload :: proc(a: ^Assets) {
-	gostek_unload(&a.gostek)
-	bullet_art_unload(&a.bullet_art)
-	things_art_unload(&a.things_art)
-	if a.map_texture.id != 0 do rl.UnloadTexture(a.map_texture)
-	for t in a.scenery do if t.id != 0 do rl.UnloadTexture(t)
-	delete(a.scenery)
-	sim.level_destroy(&a.level)
-	free(a.anims)
-	free(a.skeletons)
-}
+// The map's own images: its texture and its scenery, found the way the original
+// finds them.
 
 // Soldat's polygon UVs run past 0..1 to tile the texture across a polygon.
 map_texture_load :: proc(base, name: string) -> rl.Texture2D {

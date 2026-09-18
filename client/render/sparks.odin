@@ -1,10 +1,11 @@
-package client
+#+private
+package render
 
 import "core:fmt"
 import "core:math"
 import "core:path/filepath"
 import rl "vendor:raylib"
-import "../shared/sim"
+import "../../shared/sim"
 
 // The particle effects: chips off walls, blood, smoke, explosions. From Sparks.pas
 // and the bursts in Bullets.pas HitSpray; only the styles our events produce. Purely

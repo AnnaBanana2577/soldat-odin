@@ -126,14 +126,14 @@ dev :: proc(opts: Options) -> int {
 	bots := make([dynamic]os.Process, context.temp_allocator)
 	defer for bot in bots do stop(bot)
 	for i in 0 ..< opts.bots {
-		bot, bot_err := spawn(argv({exe("client"), "-bot", "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-name", fmt.tprintf("Bot%d", i + 1), "-base", opts.base, "-map", opts.map_name}, opts.extra))
+		bot, bot_err := spawn(argv({exe("client"), "-bot", "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-name", fmt.tprintf("Bot%d", i + 1), "-base", opts.base}, opts.extra))
 		if bot_err != nil {
 			fmt.eprintfln("could not start a bot: %v", bot_err)
 			return 1
 		}
 		append(&bots, bot)
 	}
-	return run(argv({exe("client"), "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-base", opts.base, "-map", opts.map_name}, opts.extra))
+	return run(argv({exe("client"), "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-base", opts.base}, opts.extra))
 }
 
 clean :: proc() -> int {
