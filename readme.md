@@ -5,7 +5,6 @@ send their commands, the server runs the one true world and sends it whole every
 second tick; a client predicts what its own commands touch by replaying them on the
 newest snapshot, and shows everything else blended between two older snapshots; the
 server judges shots against the soldiers as their shooter saw them, up to a cap.
-This is the `interp` branch; `rollback` and `soldat-net` are the other two models.
 
 ```
 shared/sim/  the simulation, shared, one file per object: level (the map: loading,
