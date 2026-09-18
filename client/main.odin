@@ -2,7 +2,7 @@
 //
 //   connection   the link to the server (connection/)
 //   game         the world: snapshots, my prediction, everyone else shown late (game/)
-//   input        the keys and mouse, or the bot's brain (input/)
+//   input        the keys and mouse, or a script (input/)
 //   render       the window's picture: camera, map, soldiers, sparks (render/)
 //   audio        the sounds (audio/)
 //
@@ -11,12 +11,12 @@
 // the last two ticks. Everything the client is lives in App; nothing else is global.
 //
 //   client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N]
-//          [-ping MS] [-jitter MS] [-loss PERCENT] [-bot [-dodge]]
+//          [-ping MS] [-jitter MS] [-loss PERCENT] [-headless]
 //
 // The client plays the map the server names. -ping, -jitter and -loss put a simulated
-// bad line between this client and the server, for testing. -bot runs without a
-// window, its input from the brain in input/bot.odin, so the server sees a player
-// like any other; -dodge makes it change direction and jet at random in a fight.
+// bad line between this client and the server, for testing. -headless runs without a
+// window, its input scripted (input/script.odin): a player for the netcode's tests,
+// which reports what it saw with -seconds. The bots are the server's (-bots N there).
 // -interp-ticks fixes how far behind the newest snapshot the world is shown (by
 // default it follows the jitter). The debug options are in debug.odin.
 package client
@@ -42,7 +42,7 @@ App :: struct {
 	debug:       Debug,
 	conn:        connection.Connection,
 	game:        game.Game,
-	bot:         input.Bot, // before `input`: a field named after a package hides it from the fields after
+	script:      input.Script, // before `input`: a field named after a package hides it from the fields after
 	input:       input.Input,
 	camera:      render.Camera,
 	render:      render.Render,
@@ -59,8 +59,7 @@ Options :: struct {
 	port:         u16,
 	name:         string,
 	windowed:     bool,
-	bot:          bool,
-	dodge:        bool, // a bot that dodges in a fight
+	headless:     bool, // no window: scripted input, for tests
 	interp_ticks: int,  // how far behind the newest snapshot the world is shown; 0: by the jitter
 	ping, jitter, loss: f64, // the simulated line: round trip ms, extra ms at random, percent lost
 }
@@ -71,11 +70,11 @@ main :: proc() {
 	app.options, app.debug = parse_options()
 	o := &app.options
 	if o.join == "" {
-		fmt.eprintln("usage: client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N] [-ping MS] [-jitter MS] [-loss PERCENT] [-bot [-dodge]]")
+		fmt.eprintln("usage: client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N] [-ping MS] [-jitter MS] [-loss PERCENT] [-headless]")
 		os.exit(2)
 	}
-	if o.bot {
-		run_bot()
+	if o.headless {
+		run_headless()
 		return
 	}
 
@@ -115,18 +114,18 @@ main :: proc() {
 	rl.CloseWindow()
 }
 
-// A bot: the same client without a window, a picture or sound. Its brain plays, and
-// between ticks it sleeps, having nothing to draw.
-run_bot :: proc() {
+// The same client without a window, a picture or sound, its input scripted: a player
+// for the netcode's tests. Between ticks it sleeps, having nothing to draw.
+run_headless :: proc() {
 	o := &app.options
 	open_connection()
 	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot, o.interp_ticks) do fail("could not load %s from %s", app.conn.map_name, o.base)
-	input.bot_init(&app.bot, app.conn.slot, o.dodge)
+	input.script_init(&app.script, u64(app.conn.slot) + 1)
 	debug_init(&app.debug, &app.game, &app.camera)
 
 	for !app.conn.lost && !app.quit {
 		dt := frame_seconds()
-		input.bot_sample(&app.bot, &app.input, &app.game.ctx, &app.game.world)
+		input.script_sample(&app.script, &app.input, &app.game.world, app.game.me)
 
 		ticks := ticks_owed(dt)
 		for _ in 0 ..< ticks {
@@ -209,8 +208,7 @@ parse_options :: proc() -> (o: Options, d: Debug) {
 		case "-port":   o.port = u16(strconv.parse_int(next) or_else net.DEFAULT_PORT); i += 1
 		case "-name":   o.name = next; i += 1
 		case "-window": o.windowed = true
-		case "-bot":    o.bot = true
-		case "-dodge":  o.dodge = true
+		case "-headless": o.headless = true
 		case "-interp-ticks": o.interp_ticks = strconv.parse_int(next) or_else 0; i += 1
 		case "-ping":   o.ping, _ = strconv.parse_f64(next); i += 1
 		case "-jitter": o.jitter, _ = strconv.parse_f64(next); i += 1
@@ -219,6 +217,6 @@ parse_options :: proc() -> (o: Options, d: Debug) {
 			if debug_option(&d, args[i], next) do i += 1
 		}
 	}
-	if o.bot && o.name == "Major" do o.name = "Bot"
+	if o.headless && o.name == "Major" do o.name = "Headless"
 	return
 }

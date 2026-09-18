@@ -31,6 +31,8 @@ Options :: struct {
 	map_name: string,
 	port:     u16,
 	max_rewind_ms: int, // how far back a shot is judged at most (0: not at all, shooters lead)
+	bots:     int,  // played by the server itself, from the start
+	dodge:    bool, // the bots change direction and jet at random in a fight, as a person does
 }
 
 server: Server
@@ -46,6 +48,7 @@ init :: proc() {
 	o := &server.options
 	host_open(&server.host, o.port)
 	game_init(&server.game, o.base, o.map_name, u32(o.max_rewind_ms * sim.TICK_RATE / 1000))
+	for _ in 0 ..< o.bots do add_bot(&server.game, o.dodge)
 	server.last = time.tick_now()
 }
 
@@ -79,6 +82,8 @@ parse_options :: proc() -> (o: Options) {
 		case "-map":  o.map_name = next; i += 1
 		case "-port": o.port = u16(strconv.parse_int(next) or_else 23073); i += 1
 		case "-max-rewind": o.max_rewind_ms = strconv.parse_int(next) or_else 150; i += 1
+		case "-bots":  o.bots = strconv.parse_int(next) or_else 0; i += 1
+		case "-dodge": o.dodge = true
 		}
 	}
 	return

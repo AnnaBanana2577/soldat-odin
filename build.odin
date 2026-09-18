@@ -4,12 +4,13 @@
 //   odin run build.odin -file -- check          type-check every package
 //   odin run build.odin -file -- build          compile the client and the server
 //   odin run build.odin -file -- test           run the package tests
-//   odin run build.odin -file -- dev            build, then a server with a client joined (-bots N adds bots)
+//   odin run build.odin -file -- dev            build, then a server with a client joined (-bots N: the server's bots)
 //   odin run build.odin -file -- server         build, then the server alone
 //   odin run build.odin -file -- clean
 //
-// Options: -release, -no-build, -base DIR, -map NAME, -port N, -bots N. Anything after
-// the options goes to the client being run, and to the bots (dev -bots 2 -- -ping 120).
+// Options: -release, -no-build, -base DIR, -map NAME, -port N, and for dev -bots N and
+// -dodge (bots that change direction and jet at random in a fight), which go to the
+// server. Anything after the options goes to the client being run (dev -- -ping 120).
 package main
 
 import "core:fmt"
@@ -33,7 +34,8 @@ Options :: struct {
 	base:     string,
 	map_name: string,
 	port:     int,
-	bots:     int, // headless bot clients dev starts beside the player
+	bots:     int,  // dev: bots the server plays itself
+	dodge:    bool, // dev: and they dodge in a fight
 	extra:    []string, // forwarded to the program
 }
 
@@ -54,6 +56,7 @@ main :: proc() {
 		case "-map":      opts.map_name = value; i += 1
 		case "-port":     opts.port = strconv.parse_int(value) or_else opts.port; i += 1
 		case "-bots":     opts.bots = strconv.parse_int(value) or_else 0; i += 1
+		case "-dodge":    opts.dodge = true
 		case "--":        opts.extra = args[i + 1:]; i = len(args)
 		case:
 			fmt.eprintfln("unknown option %s", args[i])
@@ -111,28 +114,18 @@ run_server :: proc(opts: Options) -> int {
 	return run(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port)}, opts.extra))
 }
 
-// A server with a client joined to it, and the bots asked for, on the same line as the
-// client; everything stops when the client exits.
+// A server, with the bots asked for, and a client joined to it; everything stops when
+// the client exits.
 dev :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	server, err := spawn({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port)})
+	server, err := spawn(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port), "-bots", fmt.tprint(opts.bots)}, opts.dodge ? {"-dodge"} : {}))
 	if err != nil {
 		fmt.eprintfln("could not start the server: %v", err)
 		return 1
 	}
 	defer stop(server)
-	bots := make([dynamic]os.Process, context.temp_allocator)
-	defer for bot in bots do stop(bot)
-	for i in 0 ..< opts.bots {
-		bot, bot_err := spawn(argv({exe("client"), "-bot", "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-name", fmt.tprintf("Bot%d", i + 1), "-base", opts.base}, opts.extra))
-		if bot_err != nil {
-			fmt.eprintfln("could not start a bot: %v", bot_err)
-			return 1
-		}
-		append(&bots, bot)
-	}
 	return run(argv({exe("client"), "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-base", opts.base}, opts.extra))
 }
 

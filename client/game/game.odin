@@ -7,11 +7,14 @@ import "../../shared/sim"
 
 // The game as this client plays it. One world, rebuilt every tick by one rule:
 //
-//   the world is the server's newest snapshot;
+//   the world is the server's newest snapshot, with everything that is not mine as
+//     it is shown: a few ticks behind, blended between the two snapshots around the
+//     render tick;
 //   my pending commands are replayed on it, stepping the whole world, which predicts
-//     everything they touch;
-//   everything that is not mine is then overwritten with the world as shown: a few
-//     ticks behind, blended between the two snapshots around the render tick;
+//     everything they touch; my shots meet the others where I see them, as the server
+//     will judge them (it rewinds to the tick I show);
+//   everything that is not mine is put back as it is shown, for the replay stepped
+//     their bullets and things on too;
 //   the corpses step, and the effects are gathered: mine from my replay, the rest
 //     from the server as the render clock reaches their tick.
 //
@@ -138,9 +141,11 @@ simulate :: proc(g: ^Game, in_: ^input.Input) {
 
 	g.my_prev = g.world.soldiers[g.me].pos
 	world_reset(&g.world, latest)
-	replay(g)
 	snapshots_advance(&g.snaps)
-	if snapshots_shown(&g.snaps, g.shown) do overlay(g, g.shown)
+	shown := snapshots_shown(&g.snaps, g.shown)
+	if shown do overlay(g, g.shown)
+	replay(g)
+	if shown do overlay(g, g.shown)
 	sim.ragdolls_update(&g.ctx, &g.world)
 	gather_effects(g)
 	g.smooth *= SMOOTH_DECAY
@@ -209,7 +214,7 @@ gather_effects :: proc(g: ^Game) {
 	}
 	// the counts the debug summary shows: what I predicted against what the server ruled
 	for e in sim.events_slice(&g.frontier) {
-		if v, is_hit := e.(sim.Hit); is_hit && v.shooter == g.me && v.target != g.me do g.hits_predicted += 1
+		if v, is_hit := e.(sim.Hit); is_hit && v.shooter == g.me && wounds(g, v.target) do g.hits_predicted += 1
 	}
 	for e in sim.events_slice(&g.events) {
 		#partial switch v in e {
@@ -217,6 +222,15 @@ gather_effects :: proc(g: ^Game) {
 		case sim.Damage: if v.attacker == g.me && v.target != g.me do g.hits_confirmed += 1
 		}
 	}
+}
+
+// Whether my hit on `target` would wound it: another soldier, and on the other team
+// unless friendly fire is on (damage_apply's rule).
+@(private)
+wounds :: proc(g: ^Game, target: u8) -> bool {
+	if target == g.me do return false
+	me, them := &g.world.soldiers[g.me], &g.world.soldiers[target]
+	return g.world.round.friendly_fire || me.team == .None || me.team != them.team
 }
 
 // ---- sending ----

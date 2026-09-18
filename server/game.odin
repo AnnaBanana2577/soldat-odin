@@ -33,6 +33,7 @@ SENT_RING :: 64 // snapshots kept as delta bases: a second of them
 // little faster or slower to hold that.
 Client :: struct {
 	connected: bool,
+	bot:       Maybe(Bot),           // played by the server itself: no peer, no queue, no snapshots
 	queue:     [dynamic]sim.Command, // by seq, all newer than ack
 	last:      sim.Command,          // the command applied last tick
 	ack:       u32,                  // the seq of `last`
@@ -118,13 +119,41 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 		peer_send(peer, net.writer_bytes(&w), reliable = true)
 		return
 	}
-	slot := host_assign(host, peer)
+	slot := free_slot(g)
 	if slot == NO_SLOT {
 		w: net.Writer
 		net.encode_denied(&w, "server full")
 		peer_send(peer, net.writer_bytes(&w), reliable = true)
 		return
 	}
+	host_bind(host, slot, peer)
+	g.clients[slot] = {connected = true}
+	team := spawn_newcomer(g, slot)
+	fmt.printfln("%s joined as slot %d on %v", m.name, slot, team)
+	w: net.Writer
+	net.encode_welcome(&w, {slot = slot, tick = g.world.tick, map_name = g.map_name})
+	host_send(host, slot, net.writer_bytes(&w), reliable = true)
+}
+
+// A bot, in the first free slot, on the smaller team.
+add_bot :: proc(g: ^Game, dodge: bool) {
+	slot := free_slot(g)
+	if slot == NO_SLOT do return
+	brain: Bot
+	bot_init(&brain, dodge)
+	g.clients[slot] = {connected = true, bot = brain}
+	team := spawn_newcomer(g, slot)
+	fmt.printfln("a bot joined as slot %d on %v", slot, team)
+}
+
+// The first slot nobody plays, or NO_SLOT when the server is full.
+free_slot :: proc(g: ^Game) -> u8 {
+	for &c, i in g.clients do if !c.connected do return u8(i)
+	return NO_SLOT
+}
+
+// A soldier for a newcomer, on the smaller team's spawn.
+spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 	alpha, bravo := 0, 0
 	for &s in g.world.soldiers {
 		if !s.active do continue
@@ -134,11 +163,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	team := alpha <= bravo ? sim.Team.Alpha : sim.Team.Bravo
 	pos := sim.level_spawn_point(g.ctx.level, team, &g.world.rng)
 	sim.soldier_spawn(&g.ctx, &g.world.soldiers[slot], pos, team, .AK74, .Colt)
-	g.clients[slot] = {connected = true}
-	fmt.printfln("%s joined as slot %d on %v", m.name, slot, team)
-	w: net.Writer
-	net.encode_welcome(&w, {slot = slot, tick = g.world.tick, map_name = g.map_name})
-	host_send(host, slot, net.writer_bytes(&w), reliable = true)
+	return team
 }
 
 leave :: proc(g: ^Game, slot: u8) {
@@ -160,6 +185,10 @@ tick :: proc(g: ^Game) {
 	cmds: [sim.MAX_PLAYERS]sim.Command
 	for &c, i in g.clients {
 		if !c.connected do continue
+		if brain, is_bot := &c.bot.?; is_bot {
+			cmds[i] = bot_command(brain, &g.ctx, &g.world, u8(i)) // it sees the present: nothing to rewind
+			continue
+		}
 		c.depth = u8(min(len(c.queue), 255))
 		if len(c.queue) > 0 {
 			c.last = c.queue[0]
@@ -191,7 +220,7 @@ tick :: proc(g: ^Game) {
 		}
 		fact := net.Timed_Event{seq = g.next_fact, tick = g.world.tick, e = e}
 		g.next_fact += 1
-		for &c in g.clients do if c.connected do append(&c.facts, Queued_Fact{fact = fact})
+		for &c in g.clients do if c.connected && c.bot == nil do append(&c.facts, Queued_Fact{fact = fact})
 	}
 }
 
@@ -209,7 +238,7 @@ send_snapshots :: proc(g: ^Game, host: ^Host) {
 	g.sent[snap.tick % SENT_RING] = snap^
 	defer sim.events_clear(&snap.events)
 	for &c, i in g.clients {
-		if !c.connected do continue
+		if !c.connected || c.bot != nil do continue
 		snap.ack = c.ack
 		snap.queue_depth = c.depth
 		base: ^net.Snapshot

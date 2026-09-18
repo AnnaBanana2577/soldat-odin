@@ -1,14 +1,14 @@
-package input
+package server
 
 import "core:time"
-import "../../shared/sim"
+import "../shared/sim"
 
-// A bot's brain, for testing: what a client sees, turned into this tick's input. It
+// A bot: a player the server plays itself, with no client and no connection. Its brain
+// reads the server's world, in the present, and turns it into this tick's command. It
 // runs toward the nearest living enemy, jets when the target is above, jumps when it
 // stops making progress, and fires with line of sight within range. Something to
 // shoot at and be shot by, not the original's waypoint AI.
 Bot :: struct {
-	me:       u8,
 	tick:     int,
 	jet_hold: int, // ticks of jet left to hold
 	stuck:    int, // ticks spent trying to move without getting anywhere
@@ -21,17 +21,18 @@ Bot :: struct {
 
 BOT_FIRE_RANGE :: 650.0
 
-bot_init :: proc(b: ^Bot, me: u8, dodge: bool) {
-	b^ = {me = me, dodge = dodge, rng = u64(time.now()._nsec) | 1}
+bot_init :: proc(b: ^Bot, dodge: bool) {
+	b^ = {dodge = dodge, rng = u64(time.now()._nsec) | 1}
 }
 
-bot_sample :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
+// This tick's command for the bot in `slot`.
+bot_command :: proc(b: ^Bot, ctx: ^sim.Context, w: ^sim.World, slot: u8) -> (cmd: sim.Command) {
 	b.tick += 1
-	s := &w.soldiers[b.me]
+	s := &w.soldiers[slot]
 	held: sim.Buttons
-	in_.aim = s.pos + {f32(s.direction) * 100, 0}
+	cmd.aim = s.pos + {f32(s.direction) * 100, 0}
 	if s.active && !s.dead {
-		if target, dist := bot_nearest_enemy(w, b.me); target != nil {
+		if target, dist := bot_nearest_enemy(w, slot); target != nil {
 			d := target.pos - s.pos
 			if abs(d.x) > 30 do held += d.x > 0 ? {.Right} : {.Left}
 			if d.y < -60 && s.jets > 20 do b.jet_hold = 12
@@ -48,7 +49,7 @@ bot_sample :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 				}
 			}
 			if b.dodge && dist < BOT_FIRE_RANGE do bot_dodge(b, &held)
-			in_.aim = target.pos + {(sim.rand_f32(&b.rng) * 2 - 1) * 10, -8 + (sim.rand_f32(&b.rng) * 2 - 1) * 8}
+			cmd.aim = target.pos + {(sim.rand_f32(&b.rng) * 2 - 1) * 10, -8 + (sim.rand_f32(&b.rng) * 2 - 1) * 8}
 			if dist < BOT_FIRE_RANGE && s.cease_fire_counter < 0 {
 				_, blocked := sim.ray_cast(ctx.level, s.pos - {0, 8}, target.pos - {0, 8}, BOT_FIRE_RANGE, {bullet = true, team = s.team})
 				if !blocked && sim.rand_int(&b.rng, 10) < 7 do held += {.Fire}
@@ -60,7 +61,8 @@ bot_sample :: proc(b: ^Bot, in_: ^Input, ctx: ^sim.Context, w: ^sim.World) {
 		}
 	}
 	b.last_x = s.pos.x
-	in_.held = held
+	cmd.buttons = held
+	return
 }
 
 // Left, right or still, jumping and jetting, each for a few ticks at random: the moves

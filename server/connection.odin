@@ -63,19 +63,13 @@ host_receive :: proc(h: ^Host) -> []Received {
 	return h.inbox[:]
 }
 
-// A free slot for a peer that said hello, or NO_SLOT when full.
-host_assign :: proc(h: ^Host, peer: ^enet.Peer) -> u8 {
-	for p, i in h.peers {
-		if p == nil {
-			h.peers[i] = peer
-			// ENet drops unreliable packets when it thinks the line is congested, and is
-			// easily fooled; a lost snapshot only makes the client wait for the next. Never.
-			enet.peer_throttle_configure(peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
-			peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
-			return u8(i)
-		}
-	}
-	return NO_SLOT
+// A peer that said hello, in the slot the game gave it.
+host_bind :: proc(h: ^Host, slot: u8, peer: ^enet.Peer) {
+	h.peers[slot] = peer
+	// ENet drops unreliable packets when it thinks the line is congested, and is
+	// easily fooled; a lost snapshot only makes the client wait for the next. Never.
+	enet.peer_throttle_configure(peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
+	peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
 }
 
 slot_of :: proc(h: ^Host, peer: ^enet.Peer) -> int {

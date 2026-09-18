@@ -19,11 +19,11 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   connection/  the link to the server, the simulated bad line
   game/        the world: game (reset / replay / overlay / effects), snapshots (the
                ring and the render clock)
-  input/       input (the keys and mouse), bot (the headless brain)
+  input/       input (the keys and mouse), script (the headless client's)
   render/      render (the frame, the map's meshes), camera, textures, gostek,
                bullet_art, things_art, sparks, sprite
   audio/       audio
-server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
+server/      main (init / server_loop / cleanup), game (tick / send_snapshots), bots,
              connection
 ```
 
@@ -42,7 +42,8 @@ until the window closes:
 close audio, render, game, connection, window
 ```
 
-A bot (-bot) runs the same without the window, the picture and the sound (run_bot).
+A headless client (-headless) runs the same without the window, the picture and the
+sound (run_headless), its input scripted: a player for testing the netcode.
 
 The server loop, server/main.odin:
 
@@ -85,10 +86,9 @@ quits with a line of counts (-seconds N for a longer run). The debug options liv
 client/debug.odin and nowhere else. The last puts a simulated bad line between every
 client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
 in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
-trip and a half later, and those behind it wait). A bot is the client with -bot: no
-window, its input from client/input/bot.odin, so the server sees a player like any other;
--dodge makes it change direction and jet at random in a fight, as a person does.
--port N picks another port on the server and the client alike.
+trip and a half later, and those behind it wait). The bots are the server's own
+(-bots N; with -dodge they change direction and jet at random in a fight, as a person
+does). -port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires.
@@ -193,8 +193,14 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   the tick before; bullets whistle and whiz past us. Four reserved voices per soldier
   keep the loops alive and let a wind-up be cut. Corpse thuds, shell casings and the
   antics are not in yet.
-- Bots, for testing: the client with -bot has no window and takes its input from a
-  small brain (run at the nearest enemy, jet when it is above, jump when stuck, fire
-  with line of sight in range). A simulated bad line (-ping, -jitter, -loss) sits on
-  any client, bots included.
+- Bots: the server plays them itself (server/bots.odin), with no client and no
+  connection: each tick a small brain reads the server's world and gives the bot's
+  command (run at the nearest enemy, jet when it is above, jump when stuck, fire with
+  line of sight in range). The server's -bots N adds them, -dodge makes them dodge.
+- Tests without a person: the client's -headless has no window and scripted input
+  (random keys every quarter to three quarters of a second, aimed at the nearest
+  enemy), and with -seconds N it quits with a summary: what it saw and what the
+  server ruled of its hits, and how far behind it showed the world. A simulated bad
+  line (-ping, -jitter, -loss) sits on any client. The server's leave line says how
+  far back each client's shots were judged.
 - The HUD is still a stub.
