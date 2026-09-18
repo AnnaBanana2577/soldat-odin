@@ -30,17 +30,19 @@ server/      main (init / server_loop / cleanup), game (tick / send_snapshots),
 The client, client/main.odin:
 
 ```
-connection.open, game.init, render.init, audio.init
-while running:
-  sample input                  the keys and cursor, or the bot
-  tick accumulator:
+open window, connection, game, render, audio
+until the window closes:
+  sample input                  the keys and the cursor in the world
+  for each tick owed:
     game.receive                the server's snapshots
     game.simulate               the world: newest snapshot, my replay, the rest shown late
     render.tick, audio.tick     the sparks and sounds of it
     game.send                   my commands
   render.camera_follow, render.draw
-audio.destroy, render.destroy, game.destroy, connection.close
+close audio, render, game, connection, window
 ```
+
+A bot (-bot) runs the same without the window, the picture and the sound (run_bot).
 
 The server loop, server/main.odin:
 

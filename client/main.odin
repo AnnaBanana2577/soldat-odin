@@ -74,66 +74,96 @@ main :: proc() {
 		fmt.eprintln("usage: client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-interp-ticks N] [-ping MS] [-jitter MS] [-loss PERCENT] [-bot [-dodge]]")
 		os.exit(2)
 	}
-	rl.SetTraceLogLevel(.WARNING)
-	if !o.bot do open_window(o.windowed)
-
-	if !connection.open(&app.conn, o.join, o.port, o.name) do fail("could not reach %s", o.join)
-	connection.simulate_line(&app.conn, o.ping, o.jitter, o.loss)
-	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot, o.interp_ticks) do fail("could not load %s from %s", app.conn.map_name, o.base)
-	app.camera.zoom = 1
 	if o.bot {
-		input.bot_init(&app.bot, app.conn.slot, o.dodge)
-	} else {
-		render.init(&app.render, o.base, &app.game.level)
-		audio.init(&app.audio, o.base)
+		run_bot()
+		return
 	}
+
+	rl.SetTraceLogLevel(.WARNING)
+	open_window(o.windowed)
+	open_connection()
+	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot, o.interp_ticks) do fail("could not load %s from %s", app.conn.map_name, o.base)
+	render.init(&app.render, o.base, &app.game.level)
+	audio.init(&app.audio, o.base)
+	app.camera.zoom = 1
 	debug_init(&app.debug, &app.game, &app.camera)
 
-	for !should_quit() do frame()
+	for !rl.WindowShouldClose() && !app.conn.lost && !app.quit {
+		dt := frame_seconds()
+		sample_input()
 
-	if !o.bot {
-		audio.destroy(&app.audio)
-		render.destroy(&app.render)
-		rl.CloseWindow()
+		ticks := ticks_owed(dt)
+		for _ in 0 ..< ticks {
+			game.receive(&app.game, &app.conn)
+			game.simulate(&app.game, &app.input)
+			render.tick(&app.render, &app.game)
+			audio.tick(&app.audio, &app.game, app.camera.pos)
+			game.send(&app.game, &app.conn)
+			input.clear(&app.input)
+		}
+
+		alpha := f32(app.accumulator / TICK) // how far into the next tick this frame is
+		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
+		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
+		debug_frame(&app.debug, dt)
 	}
+
+	audio.destroy(&app.audio)
+	render.destroy(&app.render)
+	game.destroy(&app.game)
+	connection.close(&app.conn)
+	rl.CloseWindow()
+}
+
+// A bot: the same client without a window, a picture or sound. Its brain plays, and
+// between ticks it sleeps, having nothing to draw.
+run_bot :: proc() {
+	o := &app.options
+	open_connection()
+	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot, o.interp_ticks) do fail("could not load %s from %s", app.conn.map_name, o.base)
+	input.bot_init(&app.bot, app.conn.slot, o.dodge)
+	debug_init(&app.debug, &app.game, &app.camera)
+
+	for !app.conn.lost && !app.quit {
+		dt := frame_seconds()
+		input.bot_sample(&app.bot, &app.input, &app.game.ctx, &app.game.world)
+
+		ticks := ticks_owed(dt)
+		for _ in 0 ..< ticks {
+			game.receive(&app.game, &app.conn)
+			game.simulate(&app.game, &app.input)
+			game.send(&app.game, &app.conn)
+			input.clear(&app.input)
+		}
+
+		time.sleep(time.Duration((TICK - app.accumulator) * 1e9))
+		debug_frame(&app.debug, dt)
+	}
+
 	game.destroy(&app.game)
 	connection.close(&app.conn)
 }
 
-// One frame: the input sampled; as many ticks as the clock owes, each the server's
-// news, the world, its sparks and sounds, and my commands; then the picture.
-frame :: proc() {
-	dt := frame_seconds()
-	sample_input()
-	app.accumulator = min(app.accumulator + dt * app.game.time_scale, MAX_FRAME)
-	for app.accumulator >= TICK {
-		game.receive(&app.game, &app.conn)
-		game.simulate(&app.game, &app.input)
-		if !app.options.bot {
-			render.tick(&app.render, &app.game)
-			audio.tick(&app.audio, &app.game, app.camera.pos)
-		}
-		game.send(&app.game, &app.conn)
-		input.clear(&app.input)
-		app.accumulator -= TICK
-	}
-	app.seconds += dt
-	if app.options.bot {
-		time.sleep(time.Duration((TICK - app.accumulator) * 1e9)) // nothing to draw: sleep until the next tick
-	} else {
-		alpha := f32(app.accumulator / TICK)
-		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
-		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
-	}
-	debug_frame(&app.debug, dt)
+// The server, and the simulated bad line if one was asked for.
+open_connection :: proc() {
+	o := &app.options
+	if !connection.open(&app.conn, o.join, o.port, o.name) do fail("could not reach %s", o.join)
+	connection.simulate_line(&app.conn, o.ping, o.jitter, o.loss)
 }
 
-// This frame's input: the bot's brain, or the keys and the cursor in the world.
+// How many ticks this frame owes: its time goes in at the pace the server steers my
+// clock to (game.time_scale), a whole tick comes out per tick, and the rest waits for
+// the next frame. A stall never turns into a burst: at most MAX_FRAME is owed.
+ticks_owed :: proc(dt: f64) -> int {
+	app.seconds += dt
+	app.accumulator = min(app.accumulator + dt * app.game.time_scale, MAX_FRAME)
+	n := int(app.accumulator / TICK)
+	app.accumulator -= f64(n) * TICK
+	return n
+}
+
+// This frame's keys and mouse, the cursor turned into a place in the world.
 sample_input :: proc() {
-	if app.options.bot {
-		input.bot_sample(&app.bot, &app.input, &app.game.ctx, &app.game.world)
-		return
-	}
 	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold)
 	if app.debug.has_aim do app.input.aim = app.camera.pos + app.debug.aim
 }
@@ -143,11 +173,6 @@ cursor :: proc() -> sim.Vec2 {
 	if app.debug.has_aim do return render.screen_center() + app.debug.aim * render.pixels_per_unit(&app.camera)
 	m := rl.GetMousePosition()
 	return {m.x, m.y}
-}
-
-should_quit :: proc() -> bool {
-	if app.options.bot do return app.quit || app.conn.lost
-	return app.quit || app.conn.lost || rl.WindowShouldClose()
 }
 
 open_window :: proc(windowed: bool) {
