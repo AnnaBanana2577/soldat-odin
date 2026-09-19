@@ -38,7 +38,9 @@ rules, at the top) and what it measured; this says what it does not do yet.
   crosshair's size (`client/hud/`).
 - The weapons menu offers every weapon; the server's list of allowed weapons, and the
   weapon stats shown beside a modded weapon, are not in.
-- Lobby: teams and the team menu, chat, the console, map change and the round's end.
+- Lobby: teams and the team menu, chat, the console, voting a map. The round's end
+  shows only who won and the score, not the scoreboard; the next map's name is not
+  known until it loads.
   The roster carries names only; the player's colours would go in it. These are all
   news (reliable).
 - Console and settings: the binds (`client/input/input.odin`), the sound volume (a
@@ -66,6 +68,8 @@ rules, at the top) and what it measured; this says what it does not do yet.
 
 ## Known issues
 
+- A test window takes the keyboard's focus when it opens, so keys typed elsewhere while
+  it runs reach the game (a scripted run once picked a weapon from the menu this way).
 - A corpse was twice seen hanging under a ceiling on ctf_Ash. Not reproduced.
 - A pickup waits for the server, so it takes a round trip. By design, as in Soldat.
 - A thrown gun appears a round trip after the throw, for the same reason.

@@ -79,7 +79,6 @@ debug_init :: proc(d: ^Debug, g: ^game.Game, camera: ^render.Camera) {
 	if d.zoom > 0 do camera.zoom = d.zoom
 	if d.screenshot != "" do d.has_aim = true // a capture never follows the real mouse
 	if d.screenshot != "" && d.seconds == 0 do d.seconds = 2
-	fmt.printfln("map %s: %d polys, %d props", g.ctx.level.name, len(g.ctx.level.polys), len(g.ctx.level.props))
 }
 
 // After each frame: the counts and the capture when the run is up, with the mean frame

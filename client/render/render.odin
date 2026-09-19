@@ -6,11 +6,14 @@ import rlgl "vendor:raylib/rlgl"
 import "../game"
 import "../../shared/sim"
 
-// Everything drawn: the art read once (the map's texture and scenery, the gostek,
-// the bullets and things), the map's polygons as meshes, and the sparks, the one part
-// with a life of its own (tick). Draws the game as it stands; changes nothing in it.
+// Everything drawn: the art read once (the gostek, the bullets and things), the map's
+// part read again whenever the game loads another map (its texture and scenery, its
+// polygons as meshes), and the sparks, the one part with a life of its own (tick).
+// Draws the game as it stands; changes nothing in it.
 Render :: struct {
-	level:       ^sim.Level, // the game's
+	base:        string,
+	level:       ^sim.Level, // the game's, once it has one
+	map_loads:   int,        // which of the game's map loads the map's part was built for
 	map_texture: rl.Texture2D,   // id 0 draws the polygons untextured
 	scenery:     []rl.Texture2D, // one per entry in Level.scenery, id 0 where it failed to load
 	meshes:      Map_Meshes,
@@ -20,12 +23,9 @@ Render :: struct {
 	sparks:      Sparks,
 }
 
-// The art for the game's map, from `base`. The window must be open.
-init :: proc(r: ^Render, base: string, level: ^sim.Level) {
-	r.level = level
-	r.map_texture = map_texture_load(base, level.texture)
-	r.scenery = scenery_load(base, level.scenery)
-	map_meshes_build(&r.meshes, level, r.map_texture)
+// The art every map shares, from `base`. The window must be open.
+init :: proc(r: ^Render, base: string) {
+	r.base = base
 	gostek_load(&r.gostek, base)
 	bullet_art_load(&r.bullet_art, base)
 	things_art_load(&r.things_art, base)
@@ -37,14 +37,37 @@ destroy :: proc(r: ^Render) {
 	things_art_unload(&r.things_art)
 	bullet_art_unload(&r.bullet_art)
 	gostek_unload(&r.gostek)
+	map_unload(r)
+}
+
+// The map's part of the picture, when the game has loaded a map it was not built for.
+// The sparks of the last map go with it.
+@(private)
+map_sync :: proc(r: ^Render, g: ^game.Game) {
+	if r.map_loads == g.maps_loaded do return
+	map_unload(r)
+	r.level = &g.level
+	r.map_texture = map_texture_load(r.base, g.level.texture)
+	r.scenery = scenery_load(r.base, g.level.scenery)
+	map_meshes_build(&r.meshes, &g.level, r.map_texture)
+	for &spark in r.sparks.pool do spark = {}
+	r.map_loads = g.maps_loaded
+}
+
+@(private)
+map_unload :: proc(r: ^Render) {
+	if r.map_loads == 0 do return
 	map_meshes_unload(&r.meshes)
 	for t in r.scenery do if t.id != 0 do rl.UnloadTexture(t)
 	delete(r.scenery)
 	if r.map_texture.id != 0 do rl.UnloadTexture(r.map_texture)
+	r.level, r.scenery, r.map_texture, r.map_loads = nil, nil, {}, 0
 }
 
 // Once per tick: this tick's bursts, and every spark on.
 tick :: proc(r: ^Render, g: ^game.Game) {
+	map_sync(r, g)
+	if r.level == nil do return
 	for e in sim.events_slice(&g.events) do sparks_event(&r.sparks, e, &g.world.soldiers)
 	sparks_update(&r.sparks, r.level)
 }
@@ -114,6 +137,11 @@ build_poly_mesh :: proc(level: ^sim.Level, background: bool) -> (mesh: rl.Mesh) 
 // in front of the players, the sparks. The HUD goes over it (hud/). Reads the game,
 // changes nothing. Between the caller's BeginDrawing and EndDrawing.
 draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f64, wireframe: bool) {
+	map_sync(r, g)
+	if r.level == nil { // no map yet: the server has not named one
+		rl.ClearBackground(rl.BLACK)
+		return
+	}
 	m := &r.meshes
 	rl.ClearBackground(color_of(r.level.bg_bottom))
 	rl.BeginMode2D(rl_camera(camera))

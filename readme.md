@@ -29,7 +29,7 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), bot (the brain of the server's bots and of the test client), math
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
-             Welcome, Roster, Input, Act, Update, Things, Facts, Correction), Fake_Link
+             Welcome, Map, Roster, Input, Act, Update, Things, Facts, Correction), Fake_Link
 shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), debug, and a package
              per subsystem:
@@ -100,6 +100,7 @@ odin run build.odin -file -- dev -- -window          in a window instead of bord
 odin run build.odin -file -- dev -- -wire -zoom 0.3  the polygons as lines, the view closer
 odin run build.odin -file -- dev -- -hold right,fire -aim 200,0 -screenshot out.png
 odin run build.odin -file -- dev -bots 2 -- -ping 120 -jitter 30 -loss 5
+odin run build.odin -file -- dev -bots 4 -map ctf_Ash,Arena -time-limit 2 -score-limit 3
 ```
 
 The third is a scripted run for checks without a person at the screen: it holds the
@@ -108,7 +109,9 @@ quits with a line of counts (-seconds N for a longer run). The debug options liv
 client/debug.odin and nowhere else. The last puts a simulated bad line between that
 client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
 in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
-trip and a half later, and those behind it wait). The bots are the server's own
+trip and a half later, and those behind it wait). The next plays ctf_Ash and Arena in
+turn, a round each, a round ending after two minutes or three captures (the defaults
+are fifteen and ten). trip and a half later, and those behind it wait). The bots are the server's own
 (-bots N; with -dodge they change direction and jet at random in a fight, as a person
 does). -port N picks another port on the server and the client alike.
 
@@ -163,6 +166,16 @@ closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a seco
     chosen in the menu (for the next spawn; a soldier that has not moved since it
     spawned its client arms at once, its weapons being its own to say). The server
     tells everyone who plays in which slot, by name, whenever someone joins (Roster).
+  - Rounds. A round ends at its score or time limit; the scores stand for five seconds
+    and a third, counted down in the round, and the next round begins on the next map
+    of the server's rotation (-map a,b,c), or the same one. The server loads it and
+    tells everyone which it is and where its flags stand (Map), then, in that order on
+    the same channel, the things and everyone's placing with a nil tally. Joining is
+    hearing of the first Map, so a newcomer and a round's start are one path: a client
+    has no map until the server names one, the picture is rebuilt whenever the game
+    loads another, and an update from before the Map is of the last round and dropped.
+    Every placing of a soldier (a spawn, a respawn, a new round) is told as a fact and
+    every client places that soldier on it, so nobody lingers where they were.
   - The server steps every soldier every tick: its bots on their brain's command, and
     the players as a guess from their last keys (soldier_reckon), the same guess every
     client makes of them. Then each client's word replaces the guess. Because its
@@ -236,6 +249,8 @@ closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a seco
   and how far back that client's shots were judged: the two agreeing is the measure
   of the netcode. A simulated bad line (-ping, -jitter, -loss) sits on any client.
   The test command runs the wire format's tests.
+- The round's end: who won, the score and the countdown to the next, over the world;
+  the weapons menu closes for it and opens again when the next round begins.
 - The HUD (client/hud, from InterfaceGraphics.pas with its default layout, on the
   original's 640 by 480 screen scaled to the window): the health, vest, ammo or
   reload, fire interval and jet bars with their icons, the grenades, the ammo count

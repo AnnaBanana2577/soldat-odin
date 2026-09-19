@@ -11,6 +11,8 @@ import "../shared/sim"
 // everything else that matters to more than one player. Its tick reads the way a
 // client's does (client/game/game.odin):
 //
+//   next_round     once the last round's scores have stood long enough: the next map,
+//                  its things, everyone placed anew
 //   step_soldiers  every soldier one tick on: a bot on its brain's command, a player
 //                  as guessed from what its client last said, the same guess every
 //                  client makes of it
@@ -35,6 +37,9 @@ Game :: struct {
 	world:      sim.World,
 	history:    sim.History, // the last second of soldiers, for judging shots as their shooters saw
 	max_rewind: u32,         // ticks: how far back a shot is judged at most; a slower shooter leads
+	base:       string,      // where the maps are
+	rules:      Rules,
+	map_index:  int,         // of the one being played, in rules.maps
 	events:     sim.Events,  // this tick's
 	map_name:   string,
 	clients:    [sim.MAX_PLAYERS]Client,
@@ -44,6 +49,14 @@ Game :: struct {
 
 	incoming, outgoing: net.Message, // scratch: an Update is too large for the stack
 	buf: [net.MAX_PACKET]u8,
+}
+
+// What the server was started with.
+Rules :: struct {
+	maps:        []string, // played in turn, a round each
+	time_limit:  i32,      // ticks a round lasts at most; 0: the default
+	score_limit: i32,      // captures that win a round; 0: the default
+	max_rewind:  u32,      // ticks: how far back a shot is judged at most
 }
 
 Client :: struct {
@@ -84,10 +97,10 @@ MOVE_MAX_GAP     :: 15
 MUZZLE_REACH     :: 366.0
 SHOT_SPEED_SLACK :: 12.0
 
-game_init :: proc(g: ^Game, base, map_name: string, max_rewind: u32) {
-	g.max_rewind = min(max_rewind, sim.HISTORY_TICKS - 1)
-	g.map_name = map_name
-	if level, ok := sim.level_load_file(base, map_name); ok do g.level = level
+// The first map, and the data every map shares. False when the first map will not load.
+game_init :: proc(g: ^Game, base: string, rules: Rules) -> bool {
+	g.base, g.rules = base, rules
+	g.max_rewind = min(rules.max_rewind, sim.HISTORY_TICKS - 1)
 	if anims, ok := sim.anims_load_files(base); ok do g.anims = anims
 	if sk, ok := sim.skeletons_load_files(base); ok do g.skeletons = sk
 	g.ctx.level = &g.level
@@ -97,11 +110,59 @@ game_init :: proc(g: ^Game, base, map_name: string, max_rewind: u32) {
 	sim.world_init(&g.world, 1)
 	g.world.authority = true
 	g.world.history = &g.history
-	sim.round_init(&g.world.round)
-	sim.things_spawn(&g.ctx, &g.world)
+	if !map_load(g, rules.maps[0]) do return false
+	round_start(g)
+	return true
+}
+
+// ---- the rounds ----
+
+// The next map of the rotation, or the same one again when it is the only one or the
+// next will not load; its things; everyone placed anew with a nil tally. Everyone
+// hears of the map first, and then, in that order on the same channel, of the things
+// and the placings, which go out with this tick's news.
+next_round :: proc(g: ^Game, host: ^Host) {
+	g.map_index = (g.map_index + 1) % len(g.rules.maps)
+	if !map_load(g, g.rules.maps[g.map_index]) do fmt.eprintfln("could not load %s; %s again", g.rules.maps[g.map_index], g.map_name)
+	round_start(g)
+	g.outgoing = map_message(g)
+	send_message(g, host, EVERYONE)
+	for &s, i in g.world.soldiers {
+		if !s.active do continue
+		s.kills, s.deaths, s.flags, s.dead = 0, 0, 0, false
+		sim.soldier_respawn(&g.ctx, &g.world, u8(i), &g.events)
+	}
+	fmt.printfln("a round on %s", g.map_name)
+}
+
+map_load :: proc(g: ^Game, name: string) -> bool {
+	level, ok := sim.level_load_file(g.base, name)
+	if !ok do return false
+	if g.map_name != "" do sim.level_destroy(&g.level)
+	g.level, g.map_name = level, name
+	return true
+}
+
+// A round on the loaded map: no bullets and no corpses, its things placed, the scores
+// nil, the limits the server was given.
+round_start :: proc(g: ^Game) {
+	w := &g.world
+	w.bullets, w.ragdolls = {}, {}
+	g.history.count = 0 // what the soldiers did on the last map is no target
+	sim.round_init(&w.round)
+	if g.rules.time_limit > 0 do w.round.time_left = g.rules.time_limit
+	if g.rules.score_limit > 0 do w.round.score_limit = g.rules.score_limit
+	sim.things_spawn(&g.ctx, w)
+	g.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
+	clear(&g.born)
+}
+
+map_message :: proc(g: ^Game) -> net.Message {
+	return net.Map{name = g.map_name, flag_home = g.world.flag_home, tick = g.world.tick}
 }
 
 tick :: proc(g: ^Game, host: ^Host) {
+	if sim.round_over(&g.world.round) do next_round(g, host)
 	step_soldiers(g)
 	receive(g, host)
 	step_world(g)
@@ -251,8 +312,8 @@ tell_born :: proc(g: ^Game, index: int, to_shooter: bool) {
 
 // ---- joining and leaving ----
 
-// A newcomer: a slot, the welcome, the things as they stand, and a soldier on the
-// smaller team, whose placing goes out with this tick's facts like any respawn.
+// A newcomer: a slot, the welcome, the map, the things as they stand, and a soldier on
+// the smaller team, whose placing goes out with this tick's facts like any respawn.
 join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	slot := m.version == net.VERSION ? free_slot(g) : NO_SLOT
 	if slot == NO_SLOT {
@@ -263,7 +324,9 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	host_bind(host, slot, peer)
 	tick := g.world.tick
 	g.clients[slot] = {connected = true, name = net.name_make(m.name), heard = tick, token_tick = tick}
-	g.outgoing = net.Welcome{slot = slot, map_name = g.map_name}
+	g.outgoing = net.Welcome{slot = slot}
+	send_message(g, host, slot)
+	g.outgoing = map_message(g)
 	send_message(g, host, slot)
 	things: net.Things
 	for &t, i in g.world.things {

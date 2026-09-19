@@ -15,7 +15,7 @@
 //   client -join IP [-port N] [-base DIR] [-name NAME] [-window]
 //          [-ping MS] [-jitter MS] [-loss PERCENT] [-headless]
 //
-// The client plays the map the server names. -ping, -jitter and -loss put a simulated
+// The client plays the maps the server names. -ping, -jitter and -loss put a simulated
 // bad line between this client and the server, for testing. -headless runs without a
 // window, its input scripted (input/script.odin): a player for the netcode's tests,
 // which reports what it saw with -seconds. The bots are the server's (-bots N there).
@@ -84,8 +84,8 @@ main :: proc() {
 	rl.SetTraceLogLevel(.WARNING)
 	open_window(o.windowed)
 	open_connection()
-	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot) do fail("could not load %s from %s", app.conn.map_name, o.base)
-	render.init(&app.render, o.base, &app.game.level)
+	if !game.init(&app.game, o.base, app.conn.slot) do fail("could not load the game's data from %s", o.base)
+	render.init(&app.render, o.base)
 	hud.init(&app.hud, o.base)
 	audio.init(&app.audio, o.base)
 	app.camera.zoom = 1
@@ -103,6 +103,8 @@ main :: proc() {
 			audio.tick(&app.audio, &app.game, app.camera.pos)
 			input.clear(&app.input)
 		}
+
+		if app.game.missing != "" do fail("the server plays %s, which is not in %s", app.game.missing, o.base)
 
 		alpha := f32(app.accumulator / TICK) // how far into the next tick this frame is
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
@@ -127,7 +129,7 @@ main :: proc() {
 run_headless :: proc() {
 	o := &app.options
 	open_connection()
-	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot) do fail("could not load %s from %s", app.conn.map_name, o.base)
+	if !game.init(&app.game, o.base, app.conn.slot) do fail("could not load the game's data from %s", o.base)
 	input.script_init(&app.script, u64(app.conn.slot) + 1)
 	timer.fine_sleep_begin() // this loop sleeps between ticks
 	defer timer.fine_sleep_end()
@@ -143,6 +145,7 @@ run_headless :: proc() {
 			input.clear(&app.input)
 		}
 
+		if app.game.missing != "" do fail("the server plays %s, which is not in %s", app.game.missing, o.base)
 		time.sleep(time.Duration((TICK - app.accumulator) * 1e9))
 		debug_frame(&app.debug, dt)
 	}

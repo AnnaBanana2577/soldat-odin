@@ -9,7 +9,9 @@
 //                               my recent shots (each in a few packets running)
 //                      Act      what I did that the server must not miss: a gun or a
 //                               flag thrown, a suicide, the weapons I chose
-//   server -> client   Roster   who plays in which slot, by name
+//   server -> client   Map      the map to play, and where its flags stand: on joining,
+//                               and at the start of every round
+//                      Roster   who plays in which slot, by name
 //                      Update   every other tick: the soldiers in my view, the bullets
 //                               born lately (each in a few updates running), the round
 //                      Things   a thing, whole, when something happened to it
@@ -29,17 +31,17 @@ package net
 
 import "../sim"
 
-VERSION      :: 7
+VERSION      :: 8
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
 CHANNEL_RELIABLE   :: 1 // news: losing one is a desync
 CHANNEL_COUNT      :: 2
 
-Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Roster, Input, Act, Update, Things, Facts, Correction }
+Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Update, Things, Facts, Correction }
 
 RELIABLE := [Msg_Kind]bool {
-	.Invalid = false, .Hello = true, .Welcome = true, .Denied = true, .Roster = true,
+	.Invalid = false, .Hello = true, .Welcome = true, .Denied = true, .Map = true, .Roster = true,
 	.Input = false, .Act = true,
 	.Update = false, .Things = true, .Facts = true, .Correction = true,
 }
@@ -57,8 +59,17 @@ Hello :: struct {
 }
 
 Welcome :: struct {
-	slot:     u8,
-	map_name: string,
+	slot: u8,
+}
+
+// The map to play, and where its flags stand (they are placed at random among the
+// map's spawn points). A client that hears it starts a round on that map: the things
+// and bullets gone, the scores nil; the soldiers are placed by the facts that follow.
+// Joining is hearing of the first.
+Map :: struct {
+	name:      string,
+	flag_home: [2]sim.Vec2,
+	tick:      u32, // the server tick the round starts at
 }
 
 Denied :: struct {
@@ -176,13 +187,14 @@ Correction :: struct {
 	pos, vel: sim.Vec2,
 }
 
-Message :: union { Hello, Welcome, Denied, Roster, Input, Act, Update, Things, Facts, Correction }
+Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Update, Things, Facts, Correction }
 
 message_kind :: proc(m: ^Message) -> Msg_Kind {
 	switch _ in m {
 	case Hello:      return .Hello
 	case Welcome:    return .Welcome
 	case Denied:     return .Denied
+	case Map:        return .Map
 	case Roster:     return .Roster
 	case Input:      return .Input
 	case Act:        return .Act
@@ -363,8 +375,14 @@ ser_hello :: proc(s: ^Stream, m: ^Hello) {
 
 ser_welcome :: proc(s: ^Stream, m: ^Welcome) {
 	ser_u8(s, &m.slot)
-	ser_string(s, &m.map_name)
 	if !s.writing && int(m.slot) >= sim.MAX_PLAYERS do s.failed = true
+}
+
+ser_map :: proc(s: ^Stream, m: ^Map) {
+	ser_string(s, &m.name)
+	ser_vec2(s, &m.flag_home[0])
+	ser_vec2(s, &m.flag_home[1])
+	ser_u32(s, &m.tick)
 }
 
 ser_denied :: proc(s: ^Stream, m: ^Denied) {
@@ -407,6 +425,7 @@ ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_u8(s, &m.your_lag)
 	ser_enum(s, &m.round.state)
 	ser_as(s, &m.round.time_left, i32)
+	ser_as(s, &m.round.counter, i16)
 	ser_as(s, &m.round.scores[.Alpha], u16)
 	ser_as(s, &m.round.scores[.Bravo], u16)
 	ser_u32(s, &m.active)
@@ -464,6 +483,7 @@ decode :: proc(data: []u8, msg: ^Message) -> bool {
 	case .Hello:      msg^ = Hello{}
 	case .Welcome:    msg^ = Welcome{}
 	case .Denied:     msg^ = Denied{}
+	case .Map:        msg^ = Map{}
 	case .Roster:     msg^ = Roster{}
 	case .Input:      msg^ = Input{}
 	case .Act:        msg^ = Act{}
@@ -482,6 +502,7 @@ ser_message :: proc(s: ^Stream, msg: ^Message) {
 	case Hello:      ser_hello(s, &m)
 	case Welcome:    ser_welcome(s, &m)
 	case Denied:     ser_denied(s, &m)
+	case Map:        ser_map(s, &m)
 	case Roster:     ser_roster(s, &m)
 	case Input:      ser_input(s, &m)
 	case Act:        ser_act(s, &m)

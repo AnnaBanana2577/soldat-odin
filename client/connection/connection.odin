@@ -13,7 +13,6 @@ Connection :: struct {
 	host:     ^enet.Host,
 	peer:     ^enet.Peer,
 	slot:     u8,
-	map_name: string, // the server's, from the welcome
 	inbox:    [dynamic][]u8, // copies of received packets, owned here until drained
 	fake:     net.Fake_Link,
 	lost:     bool, // the server went away
@@ -50,7 +49,6 @@ open :: proc(c: ^Connection, address: string, port: u16, name: string) -> bool {
 			#partial switch m in reply {
 			case net.Welcome:
 				c.slot = m.slot
-				c.map_name = fmt.aprint(m.map_name)
 				return true
 			case net.Denied:
 				fmt.eprintfln("server refused: %s", m.reason)
@@ -71,7 +69,6 @@ close :: proc(c: ^Connection) {
 	}
 	for p in c.inbox do delete(p)
 	delete(c.inbox)
-	delete(c.map_name)
 	net.fake_destroy(&c.fake)
 	enet.deinitialize()
 }

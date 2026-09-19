@@ -8,9 +8,10 @@
 //   odin run build.odin -file -- server         build, then the server alone
 //   odin run build.odin -file -- clean
 //
-// Options: -release, -no-build, -base DIR, -map NAME, -port N, and for dev -bots N and
-// -dodge (bots that change direction and jet at random in a fight), which go to the
-// server. Anything after the options goes to the client being run (dev -- -ping 120).
+// Options: -release, -no-build, -base DIR, -map NAME[,NAME...] (played in turn, a round
+// each), -port N; for the server -time-limit MINUTES and -score-limit N, and for dev
+// -bots N and -dodge (bots that change direction and jet at random in a fight). Anything
+// after the options goes to the client being run (dev -- -ping 120).
 package main
 
 import "core:fmt"
@@ -36,6 +37,7 @@ Options :: struct {
 	port:     int,
 	bots:     int,  // dev: bots the server plays itself
 	dodge:    bool, // dev: and they dodge in a fight
+	rules:    [dynamic]string, // the server's round limits, passed on as given
 	extra:    []string, // forwarded to the program
 }
 
@@ -57,6 +59,7 @@ main :: proc() {
 		case "-port":     opts.port = strconv.parse_int(value) or_else opts.port; i += 1
 		case "-bots":     opts.bots = strconv.parse_int(value) or_else 0; i += 1
 		case "-dodge":    opts.dodge = true
+		case "-time-limit", "-score-limit": append(&opts.rules, args[i], value); i += 1
 		case "--":        opts.extra = args[i + 1:]; i = len(args)
 		case:
 			fmt.eprintfln("unknown option %s", args[i])
@@ -111,7 +114,7 @@ run_server :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	return run(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port)}, opts.extra))
+	return run(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port)}, opts.rules[:], opts.extra))
 }
 
 // A server, with the bots asked for, and a client joined to it; everything stops when
@@ -120,7 +123,7 @@ dev :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	server, err := spawn(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port), "-bots", fmt.tprint(opts.bots)}, opts.dodge ? {"-dodge"} : {}))
+	server, err := spawn(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port), "-bots", fmt.tprint(opts.bots)}, opts.rules[:], opts.dodge ? {"-dodge"} : {}))
 	if err != nil {
 		fmt.eprintfln("could not start the server: %v", err)
 		return 1

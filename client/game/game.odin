@@ -1,5 +1,7 @@
 package game
 
+import "core:fmt"
+import "core:strings"
 import "../connection"
 import "../input"
 import "../../shared/net"
@@ -21,10 +23,15 @@ import "../../shared/sim"
 //   send           my soldier, the tick I show the others at, my recent shots
 //
 // The game owns what the sim reads and never writes (the map, the animations, the
-// weapons, the things' skeletons), loaded for the map the server named.
+// weapons, the things' skeletons). The map is the one the server names, on joining and
+// at every round (receive_map); until it has named one there is nothing to play.
 Game :: struct {
 	ctx:       sim.Context,
+	base:      string,
 	level:     sim.Level,
+	map_name:  string, // the loaded map's
+	maps_loaded: int,  // how many maps were loaded: what the picture is rebuilt by
+	missing:   string, // a map the server named and that is not here
 	anims:     ^sim.Anims,
 	skeletons: ^sim.Skeletons,
 	world:     sim.World,
@@ -52,10 +59,10 @@ Game :: struct {
 SHOT_REPEATS     :: 3  // packets a shot rides in, so a lost packet loses no shot
 MAX_FAST_FORWARD :: 40 // ticks another's bullet is flown on at most when it is heard of
 
-// The sim's data for the map, read from `base`, and an empty world for slot `me`.
-init :: proc(g: ^Game, base, map_name: string, me: u8) -> bool {
+// The sim's data every map shares, read from `base`, and an empty world for slot `me`.
+init :: proc(g: ^Game, base: string, me: u8) -> bool {
 	ok: bool
-	if g.level, ok = sim.level_load_file(base, map_name); !ok do return false
+	g.base = base
 	if g.anims, ok = sim.anims_load_files(base); !ok do return false
 	if g.skeletons, ok = sim.skeletons_load_files(base); !ok do return false
 	g.ctx.level = &g.level
@@ -72,7 +79,9 @@ init :: proc(g: ^Game, base, map_name: string, me: u8) -> bool {
 }
 
 destroy :: proc(g: ^Game) {
-	sim.level_destroy(&g.level)
+	if g.maps_loaded > 0 do sim.level_destroy(&g.level)
+	delete(g.map_name)
+	delete(g.missing)
 	free(g.anims)
 	free(g.skeletons)
 	delete(g.shots)
@@ -96,8 +105,10 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 	for data in connection.receive(conn) {
 		if !net.decode(data, g.incoming) do continue
 		#partial switch &m in g.incoming {
+		case net.Map:
+			receive_map(g, &m)
 		case net.Update:
-			receive_update(g, &m)
+			if g.maps_loaded > 0 do receive_update(g, &m)
 		case net.Roster:
 			for i in 0 ..< m.count do g.names[m.slots[i]] = m.names[i]
 		case net.Things:
@@ -113,6 +124,30 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 	}
 }
 
+// A round on the map the server names: loaded, unless it is the one I have; the things,
+// the bullets and the corpses gone; the scores nil. The soldiers are placed by the
+// facts that follow it, and an update from before it speaks of the last round.
+receive_map :: proc(g: ^Game, m: ^net.Map) {
+	if m.name != g.map_name {
+		level, ok := sim.level_load_file(g.base, m.name)
+		if !ok {
+			g.missing = strings.clone(m.name)
+			return
+		}
+		if g.maps_loaded > 0 do sim.level_destroy(&g.level)
+		g.level = level
+		delete(g.map_name)
+		g.map_name = strings.clone(m.name)
+		g.maps_loaded += 1
+		fmt.printfln("map %s: %d polys, %d props", g.map_name, len(g.level.polys), len(g.level.props))
+	}
+	w := &g.world
+	w.things, w.bullets, w.ragdolls = {}, {}, {}
+	w.flag_home = m.flag_home
+	sim.round_init(&w.round)
+	if m.tick > 0 do g.newest = max(g.newest, m.tick - 1)
+}
+
 // The world as the server has it: who is in play, the soldiers in my view, the
 // bullets born lately, the round.
 receive_update :: proc(g: ^Game, m: ^net.Update) {
@@ -121,6 +156,7 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 	g.my_lag = int(m.your_lag)
 	g.world.round.state = m.round.state
 	g.world.round.time_left = m.round.time_left
+	g.world.round.counter = m.round.counter
 	g.world.round.scores = m.round.scores
 	view_heard(&g.view, m.tick)
 	for &s, i in g.world.soldiers {
@@ -156,18 +192,20 @@ receive_fired :: proc(g: ^Game, f: ^net.Fired, update_tick: u32) {
 }
 
 // What the server decided. It sounds and shows like anything else that happened. A
-// placing of my soldier begins its next life here; and what a pickup gives me of the
-// things that are mine to say (a gun, grenades) I give myself.
+// placing of a soldier begins its next life here, mine or another's, unless an update
+// has told of that life already; and what a pickup gives me of the things that are mine
+// to say (a gun, grenades) I give myself.
 receive_fact :: proc(g: ^Game, e: sim.Event) {
 	sim.emit(&g.events, e)
 	mine := &g.world.soldiers[g.me]
 	#partial switch v in e {
 	case sim.Respawn:
-		if v.target == g.me {
-			sim.soldier_spawn(&g.ctx, mine, v.pos, v.team, v.primary, v.secondary)
-			mine.life = v.life
-			g.my_prev = v.pos
-		}
+		s := &g.world.soldiers[v.target]
+		if s.active && s.life == v.life do break
+		sim.soldier_spawn(&g.ctx, s, v.pos, v.team, v.primary, v.secondary)
+		s.life = v.life
+		if v.target == g.me do g.my_prev = v.pos
+		else do view_place(&g.view, v.target, v.pos)
 	case sim.Kit_Pickup:
 		if v.player == g.me do sim.kit_give(&g.ctx, &g.world, mine, v.kit)
 	case sim.Weapon_Pickup:

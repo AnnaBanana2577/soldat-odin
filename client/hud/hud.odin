@@ -25,7 +25,7 @@ Hud :: struct {
 	feed:   Kill_Feed,
 	menu:   Weapons_Menu,
 	big:    Big_Message,
-	was_dead: bool,
+	was_dead, was_ended: bool,
 }
 
 Art :: enum { Health, Health_Bar, Vest_Bar, Ammo, Ammo_Bar, Fire_Bar, Fire_Bar_Back, Jet, Jet_Bar, Nade, Cluster_Nade, Back, Flag, No_Flag, Cursor, Menu_Cursor }
@@ -132,7 +132,8 @@ input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken: bool) {
 // ---- the tick ----
 
 // Once per tick: the kills into the feed and across the screen, the feed scrolling
-// off, the menu opening when I die and closing when my soldier first moves.
+// off, the menu opening when I die and when a round begins, and closing when my soldier
+// first moves and when a round ends.
 tick :: proc(h: ^Hud, g: ^game.Game) {
 	for e in sim.events_slice(&g.events) {
 		if kill, is_kill := e.(sim.Kill); is_kill {
@@ -148,6 +149,11 @@ tick :: proc(h: ^Hud, g: ^game.Game) {
 	if dead && !h.was_dead do menu_open(&h.menu, by_hand = false)
 	if !dead && !mine.spawn_still do menu_moved(&h.menu)
 	h.was_dead = dead
+
+	ended := g.world.round.state == .Ended
+	if ended && !h.was_ended do h.menu.open = false
+	if !ended && h.was_ended do menu_open(&h.menu, by_hand = false)
+	h.was_ended = ended
 }
 
 // ---- the frame ----
@@ -163,7 +169,8 @@ draw :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) {
 	feed_draw(h, g, sc)
 	if h.menu.open do menu_draw(h, g, sc)
 	if mine.active && mine.dead do draw_respawn(h, sc, mine)
-	big_draw(h, sc)
+	if g.world.round.state == .Ended do draw_round_end(h, g, sc)
+	else do big_draw(h, sc)
 
 	over_menu := h.menu.open && menu_covers(sc, cursor)
 	if over_menu {
@@ -248,6 +255,23 @@ draw_respawn :: proc(h: ^Hud, sc: Screen, mine: ^sim.Soldier) {
 	draw_panel(h, sc, spread(sc, 180), 1, 300, 22)
 	line := fmt.tprintf("Respawn in... %.1f", f32(mine.respawn_counter) / sim.TICK_RATE)
 	text(h, sc, .Menu, line, spread(sc, 180) + 150, 4, {255, 65, 55, 255}, .Center)
+}
+
+// The round is over: who won, by how much, and how long until the next.
+@(private)
+draw_round_end :: proc(h: ^Hud, g: ^game.Game, sc: Screen) {
+	r := &g.world.round
+	alpha, bravo := r.scores[.Alpha], r.scores[.Bravo]
+	x := sc.width / 2
+	draw_panel(h, sc, x - 140, 150, 280, 110)
+	switch {
+	case alpha > bravo: text(h, sc, .Big, "Alpha team wins", x, 162, {210, 15, 5, 255}, .Center)
+	case bravo > alpha: text(h, sc, .Big, "Bravo team wins", x, 162, {60, 90, 245, 255}, .Center)
+	case:               text(h, sc, .Big, "It's a tie", x, 162, {245, 245, 245, 255}, .Center)
+	}
+	text(h, sc, .Menu, fmt.tprintf("%d  -  %d", alpha, bravo), x, 205, {245, 245, 245, 255}, .Center)
+	next := fmt.tprintf("Next round in %.0f", f32(max(r.counter, 0)) / sim.TICK_RATE + 0.5)
+	text(h, sc, .Small, next, x, 234, {200, 200, 200, 255}, .Center)
 }
 
 // ---- the messages across the middle ----

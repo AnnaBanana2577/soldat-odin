@@ -88,6 +88,11 @@ view_receive :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, e: ^net.Entry, 
 	v.err[e.slot] = was_shown && sim.vec2_length(off) <= ERR_SNAP ? off : {}
 }
 
+// A soldier the server has just placed: drawn there at once, not glided to.
+view_place :: proc(v: ^View, slot: u8, pos: sim.Vec2) {
+	v.prev[slot], v.drawn[slot], v.err[slot] = pos, pos, {}
+}
+
 // Where one of the others is drawn, `alpha` of the way into the tick.
 view_drawn_pos :: proc(v: ^View, w: ^sim.World, slot: int, alpha: f32) -> sim.Vec2 {
 	return v.prev[slot] + (w.soldiers[slot].pos - v.prev[slot]) * alpha + v.err[slot]
