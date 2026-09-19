@@ -119,7 +119,30 @@ roster_round_trip :: proc(t: ^testing.T) {
 	testing.expect(t, ok && decode(buf[:size], back))
 	got := back.(Roster)
 	testing.expect(t, got.count == 3 && got.slots[1] == 9)
-	testing.expect(t, name_string(&got.names[0]) == "Major")
-	testing.expect(t, len(name_string(&got.names[1])) == MAX_NAME)
-	testing.expect(t, name_string(&got.names[2]) == "tab?here")
+	testing.expect(t, text_string(&got.names[0]) == "Major")
+	testing.expect(t, len(text_string(&got.names[1])) == MAX_NAME)
+	testing.expect(t, text_string(&got.names[2]) == "tab?here")
+}
+
+// A line comes back as it was said, and a team request with its team.
+@(test)
+chat_and_team_round_trip :: proc(t: ^testing.T) {
+	sent, back := new(Message), new(Message)
+	defer free(sent)
+	defer free(back)
+	buf: [MAX_PACKET]u8
+
+	chat := Chat{slot = 4, team = true}
+	text_set(&chat.text, "gg, well played")
+	sent^ = chat
+	size, ok := encode(buf[:], sent)
+	testing.expect(t, ok && decode(buf[:size], back))
+	got := back.(Chat)
+	testing.expect(t, got.slot == 4 && got.team && text_string(&got.text) == "gg, well played")
+
+	sent^ = Act{action = .Join_Team, team = .Bravo}
+	size, ok = encode(buf[:], sent)
+	testing.expect(t, ok && decode(buf[:size], back))
+	act := back.(Act)
+	testing.expect(t, act.action == .Join_Team && act.team == .Bravo)
 }

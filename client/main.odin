@@ -110,7 +110,7 @@ main :: proc() {
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
 		rl.BeginDrawing()
 		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
-		hud.draw(&app.hud, &app.game, cursor())
+		hud.draw(&app.hud, &app.game, &app.camera, cursor(), alpha)
 		rl.EndDrawing()
 		debug_frame(&app.debug, dt)
 		free_all(context.temp_allocator) // the frame's scratch: its strings
@@ -172,11 +172,11 @@ ticks_owed :: proc(dt: f64) -> int {
 	return n
 }
 
-// This frame's keys and mouse, the cursor turned into a place in the world. The weapons
-// menu has them first: a click on it is not a shot.
+// This frame's keys and mouse, the cursor turned into a place in the world. The HUD has
+// them first: a click on a menu is not a shot, and a line typed is not a run.
 sample_input :: proc() {
-	mouse_taken := hud.input(&app.hud, &app.game, cursor())
-	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold, !mouse_taken)
+	mouse_taken, keys_taken := hud.input(&app.hud, &app.game, cursor())
+	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold, !mouse_taken, !keys_taken)
 	if app.debug.has_aim do app.input.aim = app.camera.pos + app.debug.aim
 }
 

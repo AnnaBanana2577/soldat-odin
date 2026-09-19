@@ -41,10 +41,12 @@ Game :: struct {
 	bots:      u32, // a bit for each slot the server plays itself
 	lags:      [sim.MAX_PLAYERS]u8, // how late the server finds each player sees the world, in ticks
 	events:    sim.Events, // this tick's, for the sparks and the sounds
+	heard:     [dynamic]net.Chat, // this tick's lines, for the HUD
 	primary, secondary: sim.Weapon_Id, // the weapons I chose, for my next spawn
 
 	shots:     [dynamic]net.Shot, // mine, each riding in a few packets running
 	acts:      [dynamic]net.Act,  // what I did that the server must not miss, to tell once
+	said:      [dynamic]net.Chat, // what I said, to tell once
 	next_shot: u32,
 	seen_shot: [sim.MAX_PLAYERS]u32, // the newest of each shooter's bullets flown here
 	newest:    u32, // the newest update taken: one that comes after a newer one is dropped
@@ -88,11 +90,14 @@ destroy :: proc(g: ^Game) {
 	free(g.skeletons)
 	delete(g.shots)
 	delete(g.acts)
+	delete(g.said)
+	delete(g.heard)
 	free(g.incoming)
 }
 
 tick :: proc(g: ^Game, conn: ^connection.Connection, in_: ^input.Input) {
 	sim.events_clear(&g.events)
+	clear(&g.heard)
 	view_advance(&g.view, &g.ctx, &g.world, g.me)
 	receive(g, conn)
 	step_mine(g, in_)
@@ -111,6 +116,8 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 			receive_map(g, &m)
 		case net.Update:
 			if g.maps_loaded > 0 do receive_update(g, &m)
+		case net.Chat:
+			append(&g.heard, m)
 		case net.Roster:
 			for i in 0 ..< m.count do g.names[m.slots[i]] = m.names[i]
 			g.bots = m.bots
@@ -232,8 +239,20 @@ choose_weapons :: proc(g: ^Game, primary, secondary: sim.Weapon_Id) {
 	if mine.active && !mine.dead && mine.spawn_still do sim.soldier_arm(&g.ctx, mine, primary, secondary)
 }
 
+// Joining the other team: the server moves me if the teams stay even, and says so.
+choose_team :: proc(g: ^Game, team: sim.Team) {
+	append(&g.acts, net.Act{action = .Join_Team, team = team})
+}
+
+// A line to everyone, or to my team.
+say :: proc(g: ^Game, line: string, team: bool) {
+	chat := net.Chat{team = team}
+	net.text_set(&chat.text, line)
+	append(&g.said, chat)
+}
+
 name_of :: proc(g: ^Game, slot: u8) -> string {
-	return net.name_string(&g.names[slot])
+	return net.text_string(&g.names[slot])
 }
 
 // ---- the tick ----
@@ -312,6 +331,8 @@ send :: proc(g: ^Game, conn: ^connection.Connection) {
 	connection.send_message(conn, m)
 
 	for a in g.acts do connection.send_message(conn, a)
+	for c in g.said do connection.send_message(conn, c)
+	clear(&g.said)
 	clear(&g.acts)
 	connection.flush(conn)
 }

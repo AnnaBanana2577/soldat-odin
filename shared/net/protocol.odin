@@ -8,10 +8,12 @@
 //   client -> server   Input    every tick: my soldier, the tick I show the others at,
 //                               my recent shots (each in a few packets running)
 //                      Act      what I did that the server must not miss: a gun or a
-//                               flag thrown, a suicide, the weapons I chose
+//                               flag thrown, a suicide, the weapons or team I chose
+//                      Chat     a line I said, to everyone or to my team
 //   server -> client   Map      the map to play, and where its flags stand: on joining,
 //                               and at the start of every round
 //                      Roster   who plays in which slot, by name
+//                      Chat     a line someone said, or the server
 //                      Update   every other tick: the soldiers in my view, the bullets
 //                               born lately (each in a few updates running), the round
 //                      Things   a thing, whole, when something happened to it
@@ -31,18 +33,18 @@ package net
 
 import "../sim"
 
-VERSION      :: 9
+VERSION      :: 10
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
 CHANNEL_RELIABLE   :: 1 // news: losing one is a desync
 CHANNEL_COUNT      :: 2
 
-Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Update, Things, Facts, Correction }
+Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction }
 
 RELIABLE := [Msg_Kind]bool {
 	.Invalid = false, .Hello = true, .Welcome = true, .Denied = true, .Map = true, .Roster = true,
-	.Input = false, .Act = true,
+	.Input = false, .Act = true, .Chat = true,
 	.Update = false, .Things = true, .Facts = true, .Correction = true,
 }
 
@@ -77,21 +79,30 @@ Denied :: struct {
 }
 
 MAX_NAME :: 24
+MAX_CHAT :: 85 // the original's MAXCHATTEXT
 
-// A player's name, kept without allocating: printable ASCII, as the font has it.
-Name :: struct {
-	bytes: [MAX_NAME]u8,
+// Text kept without allocating: at most N bytes, printable ASCII, as the font has it.
+Text :: struct($N: int) {
+	bytes: [N]u8,
 	len:   u8,
 }
 
-name_make :: proc(s: string) -> (n: Name) {
-	n.len = u8(copy(n.bytes[:], s))
-	for &b in n.bytes[:n.len] do if b < 32 || b > 126 do b = '?' // what the font can draw
-	return
+Name :: Text(MAX_NAME)
+Line :: Text(MAX_CHAT)
+
+// `s` cut to fit, with what the font cannot draw replaced.
+text_set :: proc(t: ^Text($N), s: string) {
+	t.len = u8(copy(t.bytes[:], s))
+	for &b in t.bytes[:t.len] do if b < 32 || b > 126 do b = '?'
 }
 
-name_string :: proc(n: ^Name) -> string {
-	return string(n.bytes[:n.len])
+text_string :: proc(t: ^Text($N)) -> string {
+	return string(t.bytes[:t.len])
+}
+
+name_make :: proc(s: string) -> (n: Name) {
+	text_set(&n, s)
+	return
 }
 
 // Who plays in which slot. A newcomer hears of everyone, and everyone of a newcomer.
@@ -124,13 +135,22 @@ Input :: struct {
 	shot_count: int,
 }
 
-Action :: enum u8 { Throw_Gun, Throw_Flag, Suicide, Loadout }
+Action :: enum u8 { Throw_Gun, Throw_Flag, Suicide, Loadout, Join_Team }
 
 Act :: struct {
 	action: Action,
 	weapon: sim.Weapon_Id, // a thrown gun, as it left my hand; or the primary I chose
 	second: sim.Weapon_Id, // the secondary I chose
 	ammo:   i32,
+	team:   sim.Team,      // the team I would join
+}
+
+// A line said. From a client `slot` is not read: the server knows who sent it. From the
+// server, 255 is the server itself. `team`: to the speaker's team alone.
+Chat :: struct {
+	slot: u8,
+	team: bool,
+	text: Line,
 }
 
 // A soldier in an update: always the server's half, and its player's half unless it
@@ -189,7 +209,7 @@ Correction :: struct {
 	pos, vel: sim.Vec2,
 }
 
-Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Update, Things, Facts, Correction }
+Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction }
 
 message_kind :: proc(m: ^Message) -> Msg_Kind {
 	switch _ in m {
@@ -200,6 +220,7 @@ message_kind :: proc(m: ^Message) -> Msg_Kind {
 	case Roster:     return .Roster
 	case Input:      return .Input
 	case Act:        return .Act
+	case Chat:       return .Chat
 	case Update:     return .Update
 	case Things:     return .Things
 	case Facts:      return .Facts
@@ -391,19 +412,26 @@ ser_denied :: proc(s: ^Stream, m: ^Denied) {
 	ser_string(s, &m.reason)
 }
 
+// Its length in a byte, then the bytes; read, filtered as text_set does.
+ser_text :: proc(s: ^Stream, t: ^Text($N)) {
+	ser_u8(s, &t.len)
+	if !s.writing && int(t.len) > N {
+		s.failed, t.len = true, 0
+		return
+	}
+	b := take(s, int(t.len))
+	if b == nil do return
+	if s.writing do copy(b, t.bytes[:t.len])
+	else do text_set(t, string(b))
+}
+
 ser_roster :: proc(s: ^Stream, m: ^Roster) {
 	ser_u32(s, &m.bots)
 	ser_count(s, &m.count, sim.MAX_PLAYERS)
 	for i in 0 ..< m.count {
 		ser_u8(s, &m.slots[i])
 		if !s.writing && int(m.slots[i]) >= sim.MAX_PLAYERS do s.failed = true
-		n := &m.names[i]
-		ser_u8(s, &n.len)
-		if !s.writing && int(n.len) > MAX_NAME do s.failed, n.len = true, 0
-		b := take(s, int(n.len))
-		if b == nil do continue
-		if s.writing do copy(b, n.bytes[:n.len])
-		else do n^ = name_make(string(b))
+		ser_text(s, &m.names[i])
 	}
 }
 
@@ -416,11 +444,18 @@ ser_input :: proc(s: ^Stream, m: ^Input) {
 	for i in 0 ..< m.shot_count do ser_shot(s, &m.shots[i])
 }
 
+ser_chat :: proc(s: ^Stream, m: ^Chat) {
+	ser_u8(s, &m.slot)
+	ser_bool(s, &m.team)
+	ser_text(s, &m.text)
+}
+
 ser_act :: proc(s: ^Stream, m: ^Act) {
 	ser_enum(s, &m.action)
 	ser_enum(s, &m.weapon)
 	ser_enum(s, &m.second)
 	ser_as(s, &m.ammo, i16)
+	ser_enum(s, &m.team)
 }
 
 ser_update :: proc(s: ^Stream, m: ^Update) {
@@ -490,6 +525,7 @@ decode :: proc(data: []u8, msg: ^Message) -> bool {
 	case .Roster:     msg^ = Roster{}
 	case .Input:      msg^ = Input{}
 	case .Act:        msg^ = Act{}
+	case .Chat:       msg^ = Chat{}
 	case .Update:     msg^ = Update{}
 	case .Things:     msg^ = Things{}
 	case .Facts:      msg^ = Facts{}
@@ -509,6 +545,7 @@ ser_message :: proc(s: ^Stream, msg: ^Message) {
 	case Roster:     ser_roster(s, &m)
 	case Input:      ser_input(s, &m)
 	case Act:        ser_act(s, &m)
+	case Chat:       ser_chat(s, &m)
 	case Update:     ser_update(s, &m)
 	case Things:     ser_things(s, &m)
 	case Facts:      ser_facts(s, &m)

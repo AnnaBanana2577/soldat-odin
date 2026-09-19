@@ -29,7 +29,7 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), bot (the brain of the server's bots and of the test client), math
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
-             Welcome, Map, Roster, Input, Act, Update, Things, Facts, Correction), Fake_Link
+             Welcome, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction), Fake_Link
 shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), debug, and a package
              per subsystem:
@@ -40,7 +40,7 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   render/      render (the world's picture, the map's meshes), camera, textures,
                gostek, bullet_art, things_art, sparks, sprite
   hud/         what is drawn over the world: hud (the bars and counts, the messages,
-               the crosshair), kill_feed, weapons_menu, scoreboard
+               the crosshair), kill_feed, weapons_menu, team_menu, scoreboard, chat
   audio/       audio
 server/      main (init / server_loop / cleanup), game (the tick), connection
 ```
@@ -117,7 +117,9 @@ does). -port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
-scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary.
+scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary. M opens
+the team menu. T says something to everyone and Y to your team; Enter sends it, Esc
+lets it go.
 
 ## What works
 
@@ -263,6 +265,14 @@ scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks
   four seconds; "You killed", "Killed by" and the respawn countdown; the flags and
   the teams' scores, my place and kills, my lag; the crosshair. The wounds on a
   soldier (gostek-gfx/ranny) show below 90 health, stronger the lower it goes.
+- Teams: the team menu (the original's, on M, since there is no Esc menu yet) asks the
+  server for the other team, which it grants when the teams stay even (Soldat's balance)
+  and refuses otherwise, telling you so. A move lets go of the flag, places the soldier
+  on the new team's spawn and tells everyone; the weapons menu opens for the new life.
+- Chat: T to everyone, Y to your team. The server relays team chat to the team alone,
+  keeps a client to a line every half second, and says who joins, leaves and changes
+  team. Lines show in the top left for five seconds (the original's console), and a
+  short one over its speaker's head for as long as it takes to read.
 - The weapons menu (the original's limbo menu): it opens when I die and when I join,
   and goes away when my soldier first moves; Tab opens it by hand. Names come from
   the server's roster; the bots have names.

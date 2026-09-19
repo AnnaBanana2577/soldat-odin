@@ -124,6 +124,14 @@ flag_throw_held :: proc(ctx: ^Context, w: ^World, soldier: u8) {
 	}
 }
 
+// A carrier that is moved to the other team lets go of the flag where it stands.
+flag_let_go :: proc(w: ^World, soldier: u8) {
+	for &t in w.things {
+		if is_flag(t.style) && t.holder == soldier + 1 do t.holder, t.static = 0, false
+	}
+	w.soldiers[soldier].holding_flag = false
+}
+
 flag_respawn :: proc(ctx: ^Context, w: ^World, t: ^Thing) {
 	thing_place(ctx, t, t.style, flag_home(w, t.style))
 }

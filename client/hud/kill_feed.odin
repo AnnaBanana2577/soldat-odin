@@ -63,11 +63,11 @@ feed_draw :: proc(h: ^Hud, g: ^game.Game, sc: Screen) {
 	for &k in h.feed.kills[:h.feed.count] {
 		y += FEED_GAP
 		killer_color := k.self ? rl.Color{211, 183, 39, 235} : killer_colors(k.killer_team)
-		text(h, sc, .Tiny, fmt.tprintf("%s (%d)", net.name_string(&k.killer), k.tally), spread(sc, 595), y, killer_color, .Right)
+		text(h, sc, .Tiny, fmt.tprintf("%s (%d)", net.text_string(&k.killer), k.tally), spread(sc, 595), y, killer_color, .Right)
 		draw_art(h.guns[k.weapon], sc, spread(sc, 605), y - 1, ART_SCALE, rl.WHITE, FEED_ICON_SHRINK)
 		y += FEED_LINE
 		if k.self do continue
-		text(h, sc, .Tiny, net.name_string(&k.victim), spread(sc, 595), y, victim_colors(k.victim_team), .Right)
+		text(h, sc, .Tiny, net.text_string(&k.victim), spread(sc, 595), y, victim_colors(k.victim_team), .Right)
 		y += FEED_LINE
 	}
 }

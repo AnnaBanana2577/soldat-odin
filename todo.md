@@ -38,7 +38,8 @@ rules, at the top) and what it measured; this says what it does not do yet.
   crosshair's size (`client/hud/`).
 - The weapons menu offers every weapon; the server's list of allowed weapons, and the
   weapon stats shown beside a modded weapon, are not in.
-- Lobby: teams and the team menu, chat, the console, voting a map. The next map's
+- Lobby: spectators, Charlie and Delta (they come with the game modes), the console and
+  commands, voting a map, muting, the chat's typing indicator over heads. The next map's
   name is not known until it loads. The scoreboard has no server name (it shows the
   map's) and no spectators.
   The roster carries names only; the player's colours would go in it. These are all

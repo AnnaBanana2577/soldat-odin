@@ -62,6 +62,7 @@ Rules :: struct {
 Client :: struct {
 	connected:  bool,
 	name:       net.Name,
+	last_chat:  u32, // the tick it last said something
 	bot:        Maybe(sim.Bot), // played by the server itself (sim/bot.odin): no peer, nothing received or sent
 	heard:      u32, // the tick its soldier was last taken as its client sent it
 	lag:        f32, // how late it sees the world, in ticks, smoothed: told back to it
@@ -87,6 +88,7 @@ VIEW_HALF       :: sim.Vec2{900, 700} // of a client's view; generous: the camer
 SHOT_REACH      :: 1200.0 // a bullet whose line of flight passes this near a client is told to it
 SILENCE_LIMIT   :: 30  // ticks without word before a player's soldier lets go of its keys
 LAG_SMOOTHING   :: 0.1 // share of each new measure in the lag a client is told
+CHAT_EVERY      :: 30  // ticks a client must wait between two lines: half a second
 
 // What the server will not take a client's word for. A soldier moves at most this far
 // in a tick (the sim caps each axis at 11); a shot starts this near its shooter and
@@ -206,10 +208,11 @@ receive :: proc(g: ^Game, host: ^Host) {
 		}
 		#partial switch &m in g.incoming {
 		case net.Input: receive_input(g, host, p.slot, &m)
-		case net.Act:   receive_act(g, p.slot, m)
+		case net.Act:   receive_act(g, host, p.slot, m)
+		case net.Chat:  receive_chat(g, host, p.slot, &m)
 		}
 	}
-	for slot in host.left do leave(g, slot)
+	for slot in host.left do leave(g, host, slot)
 }
 
 // A client's soldier as it has it, and its shots. The packet's lag is measured
@@ -270,6 +273,53 @@ shot_allowed :: proc(s: ^sim.Soldier, info: ^sim.Weapon_Info, shot: net.Shot) ->
 	return sim.vec2_length(shot.vel) <= info.speed + MAX_SPEED * info.inherit + SHOT_SPEED_SLACK
 }
 
+// A move to the other team, unless it would leave that team with more players than
+// this one (Soldat's team balance): the flag let go of, a new life on the new team's
+// spawn, and everyone told.
+join_team :: proc(g: ^Game, host: ^Host, slot: u8, team: sim.Team) {
+	s := &g.world.soldiers[slot]
+	if (team != .Alpha && team != .Bravo) || team == s.team do return
+	count: [sim.Team]int
+	for &o in g.world.soldiers do if o.active do count[o.team] += 1
+	if count[team] >= count[s.team] {
+		server_says(g, host, slot, fmt.tprintf("%v team is full", team))
+		return
+	}
+	sim.flag_let_go(&g.world, slot)
+	s.team, s.dead = team, false
+	sim.soldier_respawn(&g.ctx, &g.world, slot, &g.events)
+	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", net.text_string(&g.clients[slot].name), team))
+}
+
+// A line from a client, to everyone or to its team, half a second at least after its
+// last. Who said it is the server's to say.
+receive_chat :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Chat) {
+	c := &g.clients[slot]
+	if m.text.len == 0 || (c.last_chat != 0 && g.world.tick - c.last_chat < CHAT_EVERY) do return
+	c.last_chat = g.world.tick
+	m.slot = slot
+	fmt.printfln("%s[%s] %s", m.team ? "(TEAM) " : "", net.text_string(&c.name), net.text_string(&m.text))
+	g.outgoing = m^
+	if !m.team {
+		send_message(g, host, EVERYONE)
+		return
+	}
+	team := g.world.soldiers[slot].team
+	for &o, i in g.clients {
+		if o.connected && o.bot == nil && g.world.soldiers[i].team == team do send_message(g, host, u8(i))
+	}
+}
+
+// A line from the server itself, to one client or to EVERYONE.
+server_says :: proc(g: ^Game, host: ^Host, to: u8, line: string) {
+	chat := net.Chat{slot = SERVER_SLOT}
+	net.text_set(&chat.text, line)
+	g.outgoing = chat
+	send_message(g, host, to)
+}
+
+SERVER_SLOT :: 255
+
 // A token bucket: the weapon's average rate holds, and a couple of shots that arrive
 // bunched together by the network still pass.
 take_fire_token :: proc(c: ^Client, info: ^sim.Weapon_Info, tick: u32) -> bool {
@@ -282,9 +332,10 @@ take_fire_token :: proc(c: ^Client, info: ^sim.Weapon_Info, tick: u32) -> bool {
 }
 
 // What a client did that only the server can make happen.
-receive_act :: proc(g: ^Game, slot: u8, m: net.Act) {
+receive_act :: proc(g: ^Game, host: ^Host, slot: u8, m: net.Act) {
 	s := &g.world.soldiers[slot]
-	if !s.active || (s.dead && m.action != .Loadout) do return // the dead only choose weapons
+	if !s.active do return
+	if s.dead && m.action != .Loadout && m.action != .Join_Team do return // the dead only choose
 	switch m.action {
 	case .Throw_Gun:
 		// the gun as the thrower held it, from its soldier as the server has it
@@ -293,6 +344,8 @@ receive_act :: proc(g: ^Game, slot: u8, m: net.Act) {
 		sim.flag_throw_held(&g.ctx, &g.world, slot)
 	case .Suicide:
 		sim.emit(&g.events, sim.suicide_hit(&g.world, slot))
+	case .Join_Team:
+		join_team(g, host, slot, m.team)
 	case .Loadout:
 		// for its next spawn; in a life it has not moved in yet its client has armed it already
 		if m.weapon in sim.PRIMARY_WEAPONS && m.second in sim.SECONDARY_WEAPONS {
@@ -336,6 +389,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	send_roster(g, host)
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("%s joined as slot %d on %v", m.name, slot, team)
+	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", m.name, team))
 }
 
 // A bot, in the first free slot, on the smaller team.
@@ -385,8 +439,9 @@ spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 	return team
 }
 
-leave :: proc(g: ^Game, slot: u8) {
+leave :: proc(g: ^Game, host: ^Host, slot: u8) {
 	c := &g.clients[slot]
+	server_says(g, host, EVERYONE, fmt.tprintf("%s has left the game", net.text_string(&c.name)))
 	fmt.printfln("slot %d left: %d shots taken and %d refused, %d hits given and %d taken as ruled here, judged %.0f ms back on average",
 		slot, c.shots, c.refused, c.hits_given, c.hits_taken, f64(c.judged) / f64(max(c.shots, 1)) * 1000 / sim.TICK_RATE)
 	g.world.soldiers[slot].active = false

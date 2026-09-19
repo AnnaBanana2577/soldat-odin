@@ -1,13 +1,13 @@
-// Package hud is what is drawn over the world, and the one menu in it: my soldier's
-// bars and counts, the kill feed, the weapons menu, the scoreboard, the messages across
-// the middle, the crosshair. Ported from InterfaceGraphics.pas with its default layout.
+// Package hud is what is drawn over the world, and the menus in it: my soldier's bars
+// and counts, the kill feed, the chat, the weapons and team menus, the scoreboard, the
+// messages across the middle, the crosshair. Ported from InterfaceGraphics.pas with its default layout.
 //
 // The original lays its interface out on a screen 640 by 480. So does this: every
 // position below is in those units, `scale` pixels each, and the x positions spread
 // over the window's width the way the original's do on a wide screen (Screen).
 //
-// It reads the game and changes one thing in it: the weapons the player chooses
-// (game.choose_weapons).
+// It reads the game and tells it what the player chose: weapons (game.choose_weapons),
+// a team (game.choose_team), a line to say (game.say).
 package hud
 
 import "core:fmt"
@@ -16,6 +16,7 @@ import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
 import "../game"
+import "../render"
 import "../../shared/sim"
 
 Hud :: struct {
@@ -24,8 +25,11 @@ Hud :: struct {
 	fonts:  [Font]rl.Font,
 	feed:   Kill_Feed,
 	menu:   Weapons_Menu,
+	team:   Team_Menu,
+	chat:   Chat,
 	big:    Big_Message,
 	was_dead, was_ended: bool,
+	team_was: sim.Team, // my soldier's team a tick ago: a change is the server moving me
 	scores_shown: bool, // F1
 }
 
@@ -124,18 +128,25 @@ font_find :: proc(base: string) -> string {
 
 // ---- the frame's input ----
 
-// This frame's keys and mouse for the HUD: F1 for the scoreboard, and the weapons menu.
-// Returns whether the mouse is the menu's this frame, and so not the trigger.
-input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken: bool) {
+// This frame's keys and mouse for the HUD: the chat first, which has the whole keyboard
+// while a line is typed; F1 for the scoreboard; the weapons and team menus. Returns
+// what of the keys and the mouse the HUD took this frame, which the game does not hear.
+input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken, keys_taken: bool) {
+	if chat_input(&h.chat, g) do return false, true
 	if rl.IsKeyPressed(.F1) do h.scores_shown = !h.scores_shown
-	return menu_input(&h.menu, g, cursor)
+	if rl.IsKeyPressed(.TAB) do h.team.open = false // the weapons menu's key: one menu at a time
+	// the weapons menu first: a team picked opens it, and this frame's keys are the team menu's
+	mouse_taken = menu_input(&h.menu, g, cursor)
+	mouse_taken = team_menu_input(h, g, cursor) || mouse_taken
+	return mouse_taken, false
 }
 
 // ---- the tick ----
 
 // Once per tick: the kills into the feed and across the screen, the feed scrolling
-// off, the menu opening when I die and when a round begins, and closing when my soldier
-// first moves and when a round ends.
+// off, the lines heard; the weapons menu opening when I die, when a round begins and
+// when the server moves me to the other team, and closing when my soldier first moves
+// and when a round ends.
 tick :: proc(h: ^Hud, g: ^game.Game) {
 	for e in sim.events_slice(&g.events) {
 		if kill, is_kill := e.(sim.Kill); is_kill {
@@ -144,16 +155,21 @@ tick :: proc(h: ^Hud, g: ^game.Game) {
 		}
 	}
 	feed_tick(&h.feed)
+	chat_tick(&h.chat, g)
 	if h.big.ticks > 0 do h.big.ticks -= 1
 
 	mine := &g.world.soldiers[g.me]
 	dead := !mine.active || mine.dead
-	if dead && !h.was_dead do menu_open(&h.menu, by_hand = false)
+	if dead && !h.was_dead && !h.team.open do menu_open(&h.menu, by_hand = false)
 	if !dead && !mine.spawn_still do menu_moved(&h.menu)
 	h.was_dead = dead
+	if mine.active && mine.team != h.team_was {
+		if h.team_was != .None do menu_open(&h.menu, by_hand = false)
+		h.team_was = mine.team
+	}
 
 	ended := g.world.round.state == .Ended
-	if ended && !h.was_ended do h.menu.open = false
+	if ended && !h.was_ended do h.menu.open, h.team.open = false, false
 	if !ended && h.was_ended do menu_open(&h.menu, by_hand = false)
 	h.was_ended = ended
 }
@@ -161,9 +177,10 @@ tick :: proc(h: ^Hud, g: ^game.Game) {
 // ---- the frame ----
 
 // Over the world, in the original's order: the bars and counts, the feed, the menu, the
-// scoreboard, the messages, the cursor last. `cursor` is the mouse in pixels. The
-// scoreboard covers the top of the screen, so the feed and my ping make way for it.
-draw :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) {
+// scoreboard, the messages, the cursor last. `cursor` is the mouse in pixels; the
+// camera and `alpha` place a line said over its speaker's head. The scoreboard covers
+// the top of the screen, so the feed and my ping make way for it.
+draw :: proc(h: ^Hud, g: ^game.Game, camera: ^render.Camera, cursor: sim.Vec2, alpha: f32) {
 	sc := screen()
 	mine := &g.world.soldiers[g.me]
 	alive := mine.active && !mine.dead
@@ -175,12 +192,14 @@ draw :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) {
 		feed_draw(h, g, sc)
 		text(h, sc, .Small, fmt.tprintf("%d ms", g.my_lag * 1000 / sim.TICK_RATE), spread(sc, 600), 18, {200, 200, 200, 200})
 	}
+	chat_draw(h, g, sc, camera, alpha)
 	if h.menu.open do menu_draw(h, g, sc)
+	if h.team.open do team_menu_draw(h, g, sc)
 	if mine.active && mine.dead do draw_respawn(h, sc, mine)
 	if scores do scoreboard_draw(h, g, sc)
 	if !ended do big_draw(h, sc)
 
-	over_menu := h.menu.open && menu_covers(sc, cursor)
+	over_menu := (h.menu.open && menu_covers(sc, cursor)) || (h.team.open && team_menu_covers(sc, cursor))
 	if over_menu {
 		draw_art(h.art[.Menu_Cursor], sc, cursor.x / sc.scale, cursor.y / sc.scale, ART_SCALE, rl.WHITE)
 	} else if alive {

@@ -40,6 +40,14 @@ screen_to_world :: proc(c: ^Camera, p: sim.Vec2) -> sim.Vec2 {
 	return {c.pos.x - view_w / 2 + p.x * view_w / w, c.pos.y - view_h / 2 + p.y * view_h / h}
 }
 
+// A place in the world, in pixels on the screen: screen_to_world the other way.
+world_to_screen :: proc(c: ^Camera, p: sim.Vec2) -> sim.Vec2 {
+	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
+	view_h := GAME_HEIGHT * c.zoom
+	view_w := view_h * w / h
+	return {(p.x - c.pos.x + view_w / 2) * w / view_w, (p.y - c.pos.y + view_h / 2) * h / view_h}
+}
+
 screen_center :: proc() -> sim.Vec2 {
 	return {f32(rl.GetScreenWidth()) / 2, f32(rl.GetScreenHeight()) / 2}
 }

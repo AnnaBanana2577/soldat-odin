@@ -26,11 +26,12 @@ BINDS :: [?]Bind{
 
 // The keys and mouse buttons now, and `aim`, the cursor in world space. `scripted` is
 // held the whole run by a debug option, on top of the keys. The mouse is the trigger
-// unless a menu has it (`mouse_free`).
-sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free: bool) {
+// unless a menu has it (`mouse_free`), and the keys are the soldier's unless a line is
+// being typed (`keys_free`).
+sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free, keys_free: bool) {
 	held := scripted
-	for b in BINDS {
-		if rl.IsKeyDown(b.key) do held += {b.button}
+	if keys_free {
+		for b in BINDS do if rl.IsKeyDown(b.key) do held += {b.button}
 	}
 	if mouse_free && rl.IsMouseButtonDown(.LEFT) do held += {.Fire}
 	if mouse_free && rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
