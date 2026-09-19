@@ -117,9 +117,9 @@ does). -port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
-scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary. M opens
-the team menu. T says something to everyone and Y to your team; Enter sends it, Esc
-lets it go.
+scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a
+primary, a click a secondary. M opens the team menu. T says something to everyone and
+Y to your team; Enter sends it, Esc lets it go.
 
 ## What works
 
