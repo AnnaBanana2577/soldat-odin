@@ -358,6 +358,7 @@ send_roster :: proc(g: ^Game, host: ^Host) {
 		if !c.connected do continue
 		roster.slots[roster.count] = u8(i)
 		roster.names[roster.count] = c.name
+		if c.bot != nil do roster.bots |= 1 << u32(i)
 		roster.count += 1
 	}
 	g.outgoing = roster
@@ -476,13 +477,18 @@ send_facts :: proc(g: ^Game, host: ^Host) {
 send_updates :: proc(g: ^Game, host: ^Host) {
 	w := &g.world
 	active: u32
-	for &s, i in w.soldiers do if s.active do active |= 1 << u32(i)
+	lags: [sim.MAX_PLAYERS]u8
+	for &s, i in w.soldiers {
+		if !s.active do continue
+		active |= 1 << u32(i)
+		lags[i] = u8(min(g.clients[i].lag + 0.5, 255))
+	}
 	turn := w.tick / UPDATE_EVERY
 	for &c, ri in g.clients {
 		if !c.connected || c.bot != nil do continue
 		me := &w.soldiers[ri]
 		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
-		g.outgoing = net.Update{tick = w.tick, your_lag = u8(min(c.lag + 0.5, 255)), round = w.round, active = active}
+		g.outgoing = net.Update{tick = w.tick, round = w.round, active = active, lags = lags}
 		m := &g.outgoing.(net.Update)
 		for &s, i in w.soldiers {
 			if !s.active do continue

@@ -33,14 +33,14 @@ rules, at the top) and what it measured; this says what it does not do yet.
 
 ## Game
 
-- HUD, still missing: the scoreboard (F1), the minimap, the name of the player under
+- HUD, still missing: the weapon stats page (F2), the minimap, the name of the player under
   the cursor, the bonus's name and time, the sniper line, the bink showing in the
   crosshair's size (`client/hud/`).
 - The weapons menu offers every weapon; the server's list of allowed weapons, and the
   weapon stats shown beside a modded weapon, are not in.
-- Lobby: teams and the team menu, chat, the console, voting a map. The round's end
-  shows only who won and the score, not the scoreboard; the next map's name is not
-  known until it loads.
+- Lobby: teams and the team menu, chat, the console, voting a map. The next map's
+  name is not known until it loads. The scoreboard has no server name (it shows the
+  map's) and no spectators.
   The roster carries names only; the player's colours would go in it. These are all
   news (reliable).
 - Console and settings: the binds (`client/input/input.odin`), the sound volume (a

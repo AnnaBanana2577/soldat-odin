@@ -31,7 +31,7 @@ package net
 
 import "../sim"
 
-VERSION      :: 8
+VERSION      :: 9
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
@@ -99,6 +99,7 @@ Roster :: struct {
 	slots: [sim.MAX_PLAYERS]u8,
 	names: [sim.MAX_PLAYERS]Name,
 	count: int,
+	bots:  u32, // a bit for each slot the server plays itself
 }
 
 // A bullet at birth, which is all of it that ever crosses the wire: every machine flies
@@ -155,12 +156,13 @@ Fired :: struct {
 
 // The world at `tick`. `active` has a bit for every slot in play; a soldier in play
 // but not among the entries is out of the receiver's view, and heard of now and then.
-// `your_lag` is how late the server finds the receiver sees the world, in ticks.
+// `lags` has for every slot in play how late the server finds its player sees the world,
+// in ticks: the receiver's own tells it its lag, the rest are the scoreboard's pings.
 Update :: struct {
 	tick:        u32,
-	your_lag:    u8,
 	round:       sim.Round, // state, time left, the two scores
 	active:      u32,
+	lags:        [sim.MAX_PLAYERS]u8,
 	entries:     [sim.MAX_PLAYERS]Entry,
 	entry_count: int,
 	fired:       [MAX_SHOTS_PER_UPDATE]Fired,
@@ -390,6 +392,7 @@ ser_denied :: proc(s: ^Stream, m: ^Denied) {
 }
 
 ser_roster :: proc(s: ^Stream, m: ^Roster) {
+	ser_u32(s, &m.bots)
 	ser_count(s, &m.count, sim.MAX_PLAYERS)
 	for i in 0 ..< m.count {
 		ser_u8(s, &m.slots[i])
@@ -422,13 +425,13 @@ ser_act :: proc(s: ^Stream, m: ^Act) {
 
 ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_u32(s, &m.tick)
-	ser_u8(s, &m.your_lag)
 	ser_enum(s, &m.round.state)
 	ser_as(s, &m.round.time_left, i32)
 	ser_as(s, &m.round.counter, i16)
 	ser_as(s, &m.round.scores[.Alpha], u16)
 	ser_as(s, &m.round.scores[.Bravo], u16)
 	ser_u32(s, &m.active)
+	for i in 0 ..< sim.MAX_PLAYERS do if m.active & (1 << u32(i)) != 0 do ser_u8(s, &m.lags[i])
 	ser_count(s, &m.entry_count, sim.MAX_PLAYERS)
 	for i in 0 ..< m.entry_count {
 		e := &m.entries[i]

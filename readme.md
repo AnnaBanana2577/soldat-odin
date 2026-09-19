@@ -40,7 +40,7 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   render/      render (the world's picture, the map's meshes), camera, textures,
                gostek, bullet_art, things_art, sparks, sprite
   hud/         what is drawn over the world: hud (the bars and counts, the messages,
-               the crosshair), kill_feed, weapons_menu
+               the crosshair), kill_feed, weapons_menu, scoreboard
   audio/       audio
 server/      main (init / server_loop / cleanup), game (the tick), connection
 ```
@@ -116,8 +116,8 @@ are fifteen and ten). trip and a half later, and those behind it wait). The bots
 does). -port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
-R reloads, F throws the gun, K is suicide, the mouse aims and fires. Tab opens and
-closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary.
+R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
+scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary.
 
 ## What works
 
@@ -249,8 +249,12 @@ closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a seco
   and how far back that client's shots were judged: the two agreeing is the measure
   of the netcode. A simulated bad line (-ping, -jitter, -loss) sits on any client.
   The test command runs the wire format's tests.
-- The round's end: who won, the score and the countdown to the next, over the world;
-  the weapons menu closes for it and opens again when the next round begins.
+- The scoreboard (the original's frags menu), toggled with F1 and shown at every round's
+  end with who won and the countdown to the next: the map and the time left, and each
+  team's players under its caption and total, the best first, with kills, flags,
+  deaths and ping (the server's measure of each player's lag, a byte each in every
+  Update; none for the bots, which the Roster marks). The weapons menu closes for a
+  round's end and opens again when the next round begins.
 - The HUD (client/hud, from InterfaceGraphics.pas with its default layout, on the
   original's 640 by 480 screen scaled to the window): the health, vest, ammo or
   reload, fire interval and jet bars with their icons, the grenades, the ammo count

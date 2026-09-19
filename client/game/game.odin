@@ -38,6 +38,8 @@ Game :: struct {
 	me:        u8,
 	view:      View,       // the others
 	names:     [sim.MAX_PLAYERS]net.Name, // who plays in which slot, from the server's roster
+	bots:      u32, // a bit for each slot the server plays itself
+	lags:      [sim.MAX_PLAYERS]u8, // how late the server finds each player sees the world, in ticks
 	events:    sim.Events, // this tick's, for the sparks and the sounds
 	primary, secondary: sim.Weapon_Id, // the weapons I chose, for my next spawn
 
@@ -111,6 +113,7 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 			if g.maps_loaded > 0 do receive_update(g, &m)
 		case net.Roster:
 			for i in 0 ..< m.count do g.names[m.slots[i]] = m.names[i]
+			g.bots = m.bots
 		case net.Things:
 			for i in 0 ..< m.count do g.world.things[m.indices[i]] = m.things[i]
 		case net.Facts:
@@ -153,7 +156,8 @@ receive_map :: proc(g: ^Game, m: ^net.Map) {
 receive_update :: proc(g: ^Game, m: ^net.Update) {
 	if m.tick <= g.newest do return
 	g.newest = m.tick
-	g.my_lag = int(m.your_lag)
+	g.lags = m.lags
+	g.my_lag = int(m.lags[g.me])
 	g.world.round.state = m.round.state
 	g.world.round.time_left = m.round.time_left
 	g.world.round.counter = m.round.counter

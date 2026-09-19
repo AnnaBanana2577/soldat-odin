@@ -1,6 +1,6 @@
 // Package hud is what is drawn over the world, and the one menu in it: my soldier's
-// bars and counts, the kill feed, the weapons menu, the messages across the middle,
-// the crosshair. Ported from InterfaceGraphics.pas with its default layout.
+// bars and counts, the kill feed, the weapons menu, the scoreboard, the messages across
+// the middle, the crosshair. Ported from InterfaceGraphics.pas with its default layout.
 //
 // The original lays its interface out on a screen 640 by 480. So does this: every
 // position below is in those units, `scale` pixels each, and the x positions spread
@@ -26,6 +26,7 @@ Hud :: struct {
 	menu:   Weapons_Menu,
 	big:    Big_Message,
 	was_dead, was_ended: bool,
+	scores_shown: bool, // F1
 }
 
 Art :: enum { Health, Health_Bar, Vest_Bar, Ammo, Ammo_Bar, Fire_Bar, Fire_Bar_Back, Jet, Jet_Bar, Nade, Cluster_Nade, Back, Flag, No_Flag, Cursor, Menu_Cursor }
@@ -123,9 +124,10 @@ font_find :: proc(base: string) -> string {
 
 // ---- the frame's input ----
 
-// This frame's keys and mouse for the weapons menu. Returns whether the mouse is the
-// menu's this frame, and so not the trigger.
+// This frame's keys and mouse for the HUD: F1 for the scoreboard, and the weapons menu.
+// Returns whether the mouse is the menu's this frame, and so not the trigger.
 input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken: bool) {
+	if rl.IsKeyPressed(.F1) do h.scores_shown = !h.scores_shown
 	return menu_input(&h.menu, g, cursor)
 }
 
@@ -159,18 +161,24 @@ tick :: proc(h: ^Hud, g: ^game.Game) {
 // ---- the frame ----
 
 // Over the world, in the original's order: the bars and counts, the feed, the menu, the
-// messages, the cursor last. `cursor` is the mouse in pixels.
+// scoreboard, the messages, the cursor last. `cursor` is the mouse in pixels. The
+// scoreboard covers the top of the screen, so the feed and my ping make way for it.
 draw :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) {
 	sc := screen()
 	mine := &g.world.soldiers[g.me]
 	alive := mine.active && !mine.dead
 	if alive do draw_bars(h, g, sc, mine)
+	ended := g.world.round.state == .Ended
+	scores := h.scores_shown || ended
 	draw_status(h, g, sc, mine)
-	feed_draw(h, g, sc)
+	if !scores {
+		feed_draw(h, g, sc)
+		text(h, sc, .Small, fmt.tprintf("%d ms", g.my_lag * 1000 / sim.TICK_RATE), spread(sc, 600), 18, {200, 200, 200, 200})
+	}
 	if h.menu.open do menu_draw(h, g, sc)
 	if mine.active && mine.dead do draw_respawn(h, sc, mine)
-	if g.world.round.state == .Ended do draw_round_end(h, g, sc)
-	else do big_draw(h, sc)
+	if scores do scoreboard_draw(h, g, sc)
+	if !ended do big_draw(h, sc)
 
 	over_menu := h.menu.open && menu_covers(sc, cursor)
 	if over_menu {
@@ -214,7 +222,7 @@ draw_bars :: proc(h: ^Hud, g: ^game.Game, sc: Screen, s: ^sim.Soldier) {
 }
 
 // The corner of the screen that says how the round stands: the flags and the teams'
-// scores, my place among the players and my kills, and how late I see the world.
+// scores, and my place among the players and my kills.
 @(private)
 draw_status :: proc(h: ^Hud, g: ^game.Game, sc: Screen, mine: ^sim.Soldier) {
 	w := &g.world
@@ -246,7 +254,6 @@ draw_status :: proc(h: ^Hud, g: ^game.Game, sc: Screen, mine: ^sim.Soldier) {
 		lead := players > 1 ? fmt.tprintf("%d (%+d)", mine.kills, mine.kills - best_other) : fmt.tprint(mine.kills)
 		text(h, sc, .Small, lead, x, 431, {255, 55, 50, 255})
 	}
-	text(h, sc, .Small, fmt.tprintf("%d ms", g.my_lag * 1000 / sim.TICK_RATE), spread(sc, 600), 18, {200, 200, 200, 200})
 }
 
 @(private)
@@ -255,23 +262,6 @@ draw_respawn :: proc(h: ^Hud, sc: Screen, mine: ^sim.Soldier) {
 	draw_panel(h, sc, spread(sc, 180), 1, 300, 22)
 	line := fmt.tprintf("Respawn in... %.1f", f32(mine.respawn_counter) / sim.TICK_RATE)
 	text(h, sc, .Menu, line, spread(sc, 180) + 150, 4, {255, 65, 55, 255}, .Center)
-}
-
-// The round is over: who won, by how much, and how long until the next.
-@(private)
-draw_round_end :: proc(h: ^Hud, g: ^game.Game, sc: Screen) {
-	r := &g.world.round
-	alpha, bravo := r.scores[.Alpha], r.scores[.Bravo]
-	x := sc.width / 2
-	draw_panel(h, sc, x - 140, 150, 280, 110)
-	switch {
-	case alpha > bravo: text(h, sc, .Big, "Alpha team wins", x, 162, {210, 15, 5, 255}, .Center)
-	case bravo > alpha: text(h, sc, .Big, "Bravo team wins", x, 162, {60, 90, 245, 255}, .Center)
-	case:               text(h, sc, .Big, "It's a tie", x, 162, {245, 245, 245, 255}, .Center)
-	}
-	text(h, sc, .Menu, fmt.tprintf("%d  -  %d", alpha, bravo), x, 205, {245, 245, 245, 255}, .Center)
-	next := fmt.tprintf("Next round in %.0f", f32(max(r.counter, 0)) / sim.TICK_RATE + 0.5)
-	text(h, sc, .Small, next, x, 234, {200, 200, 200, 255}, .Center)
 }
 
 // ---- the messages across the middle ----
