@@ -25,14 +25,15 @@ BINDS :: [?]Bind{
 }
 
 // The keys and mouse buttons now, and `aim`, the cursor in world space. `scripted` is
-// held the whole run by a debug option, on top of the keys.
-sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons) {
+// held the whole run by a debug option, on top of the keys. The mouse is the trigger
+// unless a menu has it (`mouse_free`).
+sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free: bool) {
 	held := scripted
 	for b in BINDS {
 		if rl.IsKeyDown(b.key) do held += {b.button}
 	}
-	if rl.IsMouseButtonDown(.LEFT) do held += {.Fire}
-	if rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
+	if mouse_free && rl.IsMouseButtonDown(.LEFT) do held += {.Fire}
+	if mouse_free && rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
 	// a one-shot button counts from the frame it goes down until a tick consumes it
 	in_.pressed += (held - in_.held) & sim.ONE_SHOT
 	in_.held = held

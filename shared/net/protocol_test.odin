@@ -98,3 +98,26 @@ bad_input_refused :: proc(t: ^testing.T) {
 	size, _ = encode(bad[:], sent)
 	testing.expect(t, !decode(bad[:size], back), "not a number")
 }
+
+// Names come back as they went, cut to what a Name holds and with what the font cannot
+// draw replaced.
+@(test)
+roster_round_trip :: proc(t: ^testing.T) {
+	sent, back := new(Message), new(Message)
+	defer free(sent)
+	defer free(back)
+	r: Roster
+	r.slots[0], r.names[0] = 3, name_make("Major")
+	r.slots[1], r.names[1] = 9, name_make("a name much longer than a name may be")
+	r.slots[2], r.names[2] = 0, name_make("tab\there")
+	r.count = 3
+	sent^ = r
+	buf: [MAX_PACKET]u8
+	size, ok := encode(buf[:], sent)
+	testing.expect(t, ok && decode(buf[:size], back))
+	got := back.(Roster)
+	testing.expect(t, got.count == 3 && got.slots[1] == 9)
+	testing.expect(t, name_string(&got.names[0]) == "Major")
+	testing.expect(t, len(name_string(&got.names[1])) == MAX_NAME)
+	testing.expect(t, name_string(&got.names[2]) == "tab?here")
+}

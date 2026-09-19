@@ -29,7 +29,8 @@ weapon_state :: proc(ctx: ^Context, id: Weapon_Id) -> Weapon {
 	}
 }
 
-// This tick's buttons on the weapon, in the control order.
+// This tick's buttons on the weapon, in the control order. Only a soldier's own player
+// runs this: a guessed step leaves the weapon alone (soldier_reckon).
 combat_control :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
 	anims := ctx.anims

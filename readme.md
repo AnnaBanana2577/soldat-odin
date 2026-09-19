@@ -29,7 +29,7 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), bot (the brain of the server's bots and of the test client), math
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
-             Welcome, Input, Act, Update, Things, Facts, Correction), Fake_Link
+             Welcome, Roster, Input, Act, Update, Things, Facts, Correction), Fake_Link
 shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), debug, and a package
              per subsystem:
@@ -37,8 +37,10 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   game/        the world: game (the tick: receive / step / send), view (the others:
                the view tick, the guessing on, the blending of corrections)
   input/       input (the keys and mouse), script (the headless client's)
-  render/      render (the frame, the map's meshes), camera, textures, gostek,
-               bullet_art, things_art, sparks, sprite
+  render/      render (the world's picture, the map's meshes), camera, textures,
+               gostek, bullet_art, things_art, sparks, sprite
+  hud/         what is drawn over the world: hud (the bars and counts, the messages,
+               the crosshair), kill_feed, weapons_menu
   audio/       audio
 server/      main (init / server_loop / cleanup), game (the tick), connection
 ```
@@ -46,9 +48,9 @@ server/      main (init / server_loop / cleanup), game (the tick), connection
 The client, client/main.odin:
 
 ```
-open window, connection, game, render, audio
+open window, connection, game, render, hud, audio
 until the window closes:
-  sample input                  the keys and the cursor in the world
+  sample input                  the weapons menu first, then the keys and the cursor
   for each tick owed:
     game.tick                   (client/game/game.odin)
       view_advance                everyone else one tick on, as guessed
@@ -56,9 +58,9 @@ until the window closes:
       step_mine                   my soldier on this tick's keys
       step_world                  the corpses, the things, every bullet
       send                        my soldier, the tick I show the others at, my shots
-    render.tick, audio.tick     the sparks and sounds of it
-  render.camera_follow, render.draw
-close audio, render, game, connection, window
+    render.tick, hud.tick, audio.tick    the sparks, the kill feed, the sounds of it
+  render.camera_follow, render.draw, hud.draw
+close audio, hud, render, game, connection, window
 ```
 
 A headless client (-headless) runs the same without the window, the picture and the
@@ -111,7 +113,8 @@ trip and a half later, and those behind it wait). The bots are the server's own
 does). -port N picks another port on the server and the client alike.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
-R reloads, F throws the gun, K is suicide, the mouse aims and fires.
+R reloads, F throws the gun, K is suicide, the mouse aims and fires. Tab opens and
+closes the weapons menu; in it a click or 1 to 0 picks a primary, a click a secondary.
 
 ## What works
 
@@ -156,7 +159,10 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
     soldier that is its to say (where it is, its keys and aim, its animation, its
     weapons), the server tick it is showing the others at, and its recent shots, each
     riding in three packets so a lost one loses no shot. What the server must not miss
-    goes once, reliably (Act): a thrown gun, a thrown flag, a suicide.
+    goes once, reliably (Act): a thrown gun, a thrown flag, a suicide, the weapons
+    chosen in the menu (for the next spawn; a soldier that has not moved since it
+    spawned its client arms at once, its weapons being its own to say). The server
+    tells everyone who plays in which slot, by name, whenever someone joins (Roster).
   - The server steps every soldier every tick: its bots on their brain's command, and
     the players as a guess from their last keys (soldier_reckon), the same guess every
     client makes of them. Then each client's word replaces the guess. Because its
@@ -230,4 +236,14 @@ R reloads, F throws the gun, K is suicide, the mouse aims and fires.
   and how far back that client's shots were judged: the two agreeing is the measure
   of the netcode. A simulated bad line (-ping, -jitter, -loss) sits on any client.
   The test command runs the wire format's tests.
-- The HUD is still a stub.
+- The HUD (client/hud, from InterfaceGraphics.pas with its default layout, on the
+  original's 640 by 480 screen scaled to the window): the health, vest, ammo or
+  reload, fire interval and jet bars with their icons, the grenades, the ammo count
+  and the weapon's name; the kill feed down the right, the killer with its tally and
+  the weapon's icon over the victim, in their teams' colours, scrolling off after
+  four seconds; "You killed", "Killed by" and the respawn countdown; the flags and
+  the teams' scores, my place and kills, my lag; the crosshair. The wounds on a
+  soldier (gostek-gfx/ranny) show below 90 health, stronger the lower it goes.
+- The weapons menu (the original's limbo menu): it opens when I die and when I join,
+  and goes away when my soldier first moves; Tab opens it by hand. Names come from
+  the server's roster; the bots have names.

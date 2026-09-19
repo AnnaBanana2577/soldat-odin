@@ -30,7 +30,9 @@ Game :: struct {
 	world:     sim.World,
 	me:        u8,
 	view:      View,       // the others
+	names:     [sim.MAX_PLAYERS]net.Name, // who plays in which slot, from the server's roster
 	events:    sim.Events, // this tick's, for the sparks and the sounds
+	primary, secondary: sim.Weapon_Id, // the weapons I chose, for my next spawn
 
 	shots:     [dynamic]net.Shot, // mine, each riding in a few packets running
 	acts:      [dynamic]net.Act,  // what I did that the server must not miss, to tell once
@@ -61,6 +63,7 @@ init :: proc(g: ^Game, base, map_name: string, me: u8) -> bool {
 	g.ctx.skeletons = g.skeletons
 	sim.weapons_default(&g.ctx.weapons)
 	g.me = me
+	g.primary, g.secondary = .AK74, .Colt // what the server arms a newcomer with
 	sim.world_init(&g.world, 0)
 	sim.round_init(&g.world.round)
 	view_init(&g.view)
@@ -95,6 +98,8 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 		#partial switch &m in g.incoming {
 		case net.Update:
 			receive_update(g, &m)
+		case net.Roster:
+			for i in 0 ..< m.count do g.names[m.slots[i]] = m.names[i]
 		case net.Things:
 			for i in 0 ..< m.count do g.world.things[m.indices[i]] = m.things[i]
 		case net.Facts:
@@ -171,6 +176,22 @@ receive_fact :: proc(g: ^Game, e: sim.Event) {
 			mine.weapon.ammo = v.ammo
 		}
 	}
+}
+
+// ---- what the player decides outside the tick ----
+
+// The weapons menu's choice: the server hears of it for my next spawn, and a soldier
+// of mine that has not moved since it spawned is armed with it at once (its weapons
+// are mine to say).
+choose_weapons :: proc(g: ^Game, primary, secondary: sim.Weapon_Id) {
+	g.primary, g.secondary = primary, secondary
+	append(&g.acts, net.Act{action = .Loadout, weapon = primary, second = secondary})
+	mine := &g.world.soldiers[g.me]
+	if mine.active && !mine.dead && mine.spawn_still do sim.soldier_arm(&g.ctx, mine, primary, secondary)
+}
+
+name_of :: proc(g: ^Game, slot: u8) -> string {
+	return net.name_string(&g.names[slot])
 }
 
 // ---- the tick ----

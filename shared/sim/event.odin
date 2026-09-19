@@ -46,7 +46,7 @@ Explosion :: struct { id: u16, player: u8, weapon: Weapon_Id, pos: Vec2, radius:
 Hit :: struct { shooter, target: u8, weapon: Weapon_Id, amount: f32, part: u8, pos, push: Vec2 }
 
 Damage :: struct { attacker, target: u8, weapon: Weapon_Id, amount: f32, vest: bool }
-Kill :: struct { killer, target: u8, weapon: Weapon_Id, pos: Vec2, health: f32, part: u8 }
+Kill :: struct { killer, target: u8, weapon: Weapon_Id, pos: Vec2, health: f32, part: u8, kills: i32 } // kills: the killer's tally now
 // The server placed a soldier: where, on which team, holding what, and the number of
 // the life that begins (Soldier.life). All its own client needs to begin it too.
 Respawn :: struct { target: u8, life: u8, team: Team, primary, secondary: Weapon_Id, pos: Vec2 }

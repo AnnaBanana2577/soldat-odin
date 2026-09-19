@@ -37,7 +37,7 @@ Control_Input :: struct {
 	pressed_left_right:                bool, // both held this tick, resolved to one
 }
 
-soldier_control :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
+soldier_control :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events, armed: bool) {
 	s := &w.soldiers[index]
 	s.legs.speed = max(s.legs.speed, 1)
 	s.body.speed = max(s.body.speed, 1)
@@ -45,7 +45,7 @@ soldier_control :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 
 	input := resolve_left_right(s)
 	jets_control(ctx, w, s, input)
-	combat_control(ctx, w, index, events)
+	if armed do combat_control(ctx, w, index, events)
 	prone_control(ctx, s, &input)
 	animation_slowdown(s)
 	cover_check(ctx, w, index)

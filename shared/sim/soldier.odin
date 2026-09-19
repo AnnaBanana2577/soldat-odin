@@ -121,6 +121,13 @@ soldier_respawn :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	emit(events, Respawn{target = index, life = s.life, team = s.team, primary = s.primary_choice, secondary = s.secondary_choice, pos = pos})
 }
 
+// The weapons a soldier chose, put in its hands: at a spawn, or from the weapons menu
+// while it has not moved since.
+soldier_arm :: proc(ctx: ^Context, s: ^Soldier, primary, secondary: Weapon_Id) {
+	s.weapon = weapon_state(ctx, primary)
+	s.secondary = weapon_state(ctx, secondary)
+}
+
 // Euler integration of the body particle, before the control step.
 soldier_integrate :: proc(s: ^Soldier, gravity: f32) {
 	s.forces.y += gravity
@@ -135,8 +142,9 @@ soldier_integrate :: proc(s: ^Soldier, gravity: f32) {
 // One tick of one soldier, in the original's order: integrate, take the knockback,
 // the controls through the state machines, animate, collide with the map, the
 // weapon timers, the jet fuel. Everything here is its player's half; the server's
-// half ticks in soldier_served_tick.
-soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: ^Events) {
+// half ticks in soldier_served_tick. `armed` is false for a guess, which moves the
+// soldier and leaves its weapon alone (soldier_reckon).
+soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: ^Events, armed := true) {
 	s := &w.soldiers[index]
 	if !s.active || s.dead do return
 	soldier_integrate(s, w.gravity)
@@ -146,10 +154,11 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 
 	// Between rounds nobody moves.
 	s.controls = w.round.state == .Ended ? {} : cmd.buttons
+	if s.controls != {} do s.spawn_still = false
 	s.aim = cmd.aim
 	// suicide is a hit on oneself, applied like any other, and a brutal one
 	if .Suicide in s.controls do emit(events, suicide_hit(w, index))
-	soldier_control(ctx, w, index, events)
+	soldier_control(ctx, w, index, events, armed)
 	s.direction = s.aim.x >= s.pos.x ? 1 : -1
 	anim_advance(ctx.anims, &s.body)
 	anim_advance(ctx.anims, &s.legs)
@@ -177,16 +186,19 @@ suicide_hit :: proc(w: ^World, index: u8) -> Hit {
 	return {shooter = index, target = index, amount = 4 * DEFAULT_HEALTH, pos = w.soldiers[index].pos}
 }
 
-// Buttons a dead-reckoned soldier never presses: one-shot actions that would fire,
-// throw or change weapons on this copy alone.
-NEVER_RECKONED :: Buttons{.Fire, .Throw, .Reload, .Change, .Suicide, .Drop, .Flag_Throw, .Prone}
+// Buttons a guessed soldier never presses: the presses outside the weapon code that
+// count once, and would count again every tick they were guessed held.
+NEVER_RECKONED :: Buttons{.Prone, .Suicide, .Flag_Throw}
 
-// One tick of a soldier nobody is playing here: its last known controls held on. Every
-// machine does this for every soldier but its own, the server included, so all of
-// them make the same guess until its player's word replaces it.
+// One tick of a soldier nobody is playing here: its last known controls held on, and
+// its weapon left alone. Every machine does this for every soldier but its own, the
+// server included, so all of them make the same guess until its player's word
+// replaces it. Unarmed, because what a weapon does is its player's to say and arrives
+// as bullets; and a guess at it goes wrong at once: with the keys it never holds let
+// go, a grenade being wound up looks released, every tick.
 soldier_reckon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
-	soldier_step(ctx, w, index, Command{buttons = s.controls - NEVER_RECKONED, aim = s.aim}, events)
+	soldier_step(ctx, w, index, Command{buttons = s.controls - NEVER_RECKONED, aim = s.aim}, events, armed = false)
 }
 
 // The server's half of a soldier's tick, whoever moves it: the way back from death and

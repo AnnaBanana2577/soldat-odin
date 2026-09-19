@@ -48,6 +48,7 @@ Game :: struct {
 
 Client :: struct {
 	connected:  bool,
+	name:       net.Name,
 	bot:        Maybe(sim.Bot), // played by the server itself (sim/bot.odin): no peer, nothing received or sent
 	heard:      u32, // the tick its soldier was last taken as its client sent it
 	lag:        f32, // how late it sees the world, in ticks, smoothed: told back to it
@@ -222,7 +223,7 @@ take_fire_token :: proc(c: ^Client, info: ^sim.Weapon_Info, tick: u32) -> bool {
 // What a client did that only the server can make happen.
 receive_act :: proc(g: ^Game, slot: u8, m: net.Act) {
 	s := &g.world.soldiers[slot]
-	if !s.active || s.dead do return
+	if !s.active || (s.dead && m.action != .Loadout) do return // the dead only choose weapons
 	switch m.action {
 	case .Throw_Gun:
 		// the gun as the thrower held it, from its soldier as the server has it
@@ -231,6 +232,11 @@ receive_act :: proc(g: ^Game, slot: u8, m: net.Act) {
 		sim.flag_throw_held(&g.ctx, &g.world, slot)
 	case .Suicide:
 		sim.emit(&g.events, sim.suicide_hit(&g.world, slot))
+	case .Loadout:
+		// for its next spawn; in a life it has not moved in yet its client has armed it already
+		if m.weapon in sim.PRIMARY_WEAPONS && m.second in sim.SECONDARY_WEAPONS {
+			s.primary_choice, s.secondary_choice = m.weapon, m.second
+		}
 	}
 }
 
@@ -256,7 +262,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	}
 	host_bind(host, slot, peer)
 	tick := g.world.tick
-	g.clients[slot] = {connected = true, heard = tick, token_tick = tick}
+	g.clients[slot] = {connected = true, name = net.name_make(m.name), heard = tick, token_tick = tick}
 	g.outgoing = net.Welcome{slot = slot, map_name = g.map_name}
 	send_message(g, host, slot)
 	things: net.Things
@@ -264,6 +270,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 		if t.style != .None do things_add(g, host, slot, &things, i, &t)
 	}
 	things_flush(g, host, slot, &things)
+	send_roster(g, host)
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("%s joined as slot %d on %v", m.name, slot, team)
 }
@@ -274,9 +281,24 @@ add_bot :: proc(g: ^Game, dodge: bool) {
 	if slot == NO_SLOT do return
 	brain: sim.Bot
 	sim.bot_init(&brain, u64(time.now()._nsec), dodge)
-	g.clients[slot] = {connected = true, bot = brain}
+	g.clients[slot] = {connected = true, bot = brain, name = net.name_make(BOT_NAMES[int(slot) % len(BOT_NAMES)])}
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("a bot joined as slot %d on %v", slot, team)
+}
+
+BOT_NAMES := [?]string{"Dutch", "Blain", "Poncho", "Billy", "Mac", "Hawkins", "Dillon", "Anna"}
+
+// Who plays in which slot, to everyone, whenever someone joins. It is small.
+send_roster :: proc(g: ^Game, host: ^Host) {
+	roster: net.Roster
+	for &c, i in g.clients {
+		if !c.connected do continue
+		roster.slots[roster.count] = u8(i)
+		roster.names[roster.count] = c.name
+		roster.count += 1
+	}
+	g.outgoing = roster
+	send_message(g, host, EVERYONE)
 }
 
 // The first slot nobody plays, or NO_SLOT when the server is full.

@@ -33,10 +33,14 @@ rules, at the top) and what it measured; this says what it does not do yet.
 
 ## Game
 
-- HUD: the health and jet bars, the ammo and the weapon, the kill feed, the scores
-  (`client/render/render.odin`).
-- Lobby: the roster with names, teams, the weapon menu, chat, map change and the
-  round's end. None of these have messages yet; they are all news (reliable).
+- HUD, still missing: the scoreboard (F1), the minimap, the name of the player under
+  the cursor, the bonus's name and time, the sniper line, the bink showing in the
+  crosshair's size (`client/hud/`).
+- The weapons menu offers every weapon; the server's list of allowed weapons, and the
+  weapon stats shown beside a modded weapon, are not in.
+- Lobby: teams and the team menu, chat, the console, map change and the round's end.
+  The roster carries names only; the player's colours would go in it. These are all
+  news (reliable).
 - Console and settings: the binds (`client/input/input.odin`), the sound volume (a
   constant in `client/audio/audio.odin`), the player's name and colours.
 - Sounds still missing: the corpse's thud, shell casings, the antics.

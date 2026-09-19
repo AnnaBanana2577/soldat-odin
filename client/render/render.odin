@@ -109,12 +109,12 @@ build_poly_mesh :: proc(level: ^sim.Level, background: bool) -> (mesh: rl.Mesh) 
 	return
 }
 
-// The frame, in the original's layer order: the sky, the background polys, scenery
-// behind, everything alive, scenery in front of it, the terrain, scenery in front of
-// the players, the sparks, then the HUD. Reads the game, changes nothing.
+// The world's part of the frame, in the original's layer order: the sky, the background
+// polys, scenery behind, everything alive, scenery in front of it, the terrain, scenery
+// in front of the players, the sparks. The HUD goes over it (hud/). Reads the game,
+// changes nothing. Between the caller's BeginDrawing and EndDrawing.
 draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f64, wireframe: bool) {
 	m := &r.meshes
-	rl.BeginDrawing()
 	rl.ClearBackground(color_of(r.level.bg_bottom))
 	rl.BeginMode2D(rl_camera(camera))
 	rlgl.DisableBackfaceCulling() // the map's triangles wind either way
@@ -130,8 +130,6 @@ draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f6
 	sparks_draw(&r.sparks)
 	if wireframe do draw_wireframe(r.level)
 	rl.EndMode2D()
-	draw_hud(g)
-	rl.EndDrawing()
 }
 
 // A mesh draws at once while everything else waits in the batch, so the batch is
@@ -233,11 +231,6 @@ draw_soldiers :: proc(r: ^Render, g: ^game.Game, alpha: f32) {
 		pose := corpse ? sim.ragdoll_pose(body, alpha) : sim.soldier_pose(g.ctx.anims, &s, game.drawn_pos(g, i, alpha))
 		gostek_draw(&r.gostek, &s, &pose, corpse)
 	}
-}
-
-@(private)
-draw_hud :: proc(g: ^game.Game) {
-	// TODO the bars, the kill feed, the weapon and ammo
 }
 
 @(private)

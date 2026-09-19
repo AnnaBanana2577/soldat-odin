@@ -3,7 +3,8 @@
 //   connection   the link to the server (connection/)
 //   game         the world: my soldier, everyone else as the server tells them (game/)
 //   input        the keys and mouse, or a script (input/)
-//   render       the window's picture: camera, map, soldiers, sparks (render/)
+//   render       the world's picture: camera, map, soldiers, sparks (render/)
+//   hud          what is drawn over it: the bars, the kill feed, the weapons menu (hud/)
 //   audio        the sounds (audio/)
 //
 // Each tick: the game's tick (the server's news in, my soldier and the world stepped,
@@ -29,6 +30,7 @@ import rl "vendor:raylib"
 import "audio"
 import "connection"
 import "game"
+import "hud"
 import "input"
 import "render"
 import "../shared/net"
@@ -47,6 +49,7 @@ App :: struct {
 	input:       input.Input,
 	camera:      render.Camera,
 	render:      render.Render,
+	hud:         hud.Hud,
 	audio:       audio.Audio,
 	accumulator: f64,
 	seconds:     f64, // since the start: the wall clock the art animates on
@@ -83,6 +86,7 @@ main :: proc() {
 	open_connection()
 	if !game.init(&app.game, o.base, app.conn.map_name, app.conn.slot) do fail("could not load %s from %s", app.conn.map_name, o.base)
 	render.init(&app.render, o.base, &app.game.level)
+	hud.init(&app.hud, o.base)
 	audio.init(&app.audio, o.base)
 	app.camera.zoom = 1
 	debug_init(&app.debug, &app.game, &app.camera)
@@ -95,17 +99,23 @@ main :: proc() {
 		for _ in 0 ..< ticks {
 			game.tick(&app.game, &app.conn, &app.input)
 			render.tick(&app.render, &app.game)
+			hud.tick(&app.hud, &app.game)
 			audio.tick(&app.audio, &app.game, app.camera.pos)
 			input.clear(&app.input)
 		}
 
 		alpha := f32(app.accumulator / TICK) // how far into the next tick this frame is
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
+		rl.BeginDrawing()
 		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
+		hud.draw(&app.hud, &app.game, cursor())
+		rl.EndDrawing()
 		debug_frame(&app.debug, dt)
+		free_all(context.temp_allocator) // the frame's scratch: its strings
 	}
 
 	audio.destroy(&app.audio)
+	hud.destroy(&app.hud)
 	render.destroy(&app.render)
 	game.destroy(&app.game)
 	connection.close(&app.conn)
@@ -159,9 +169,11 @@ ticks_owed :: proc(dt: f64) -> int {
 	return n
 }
 
-// This frame's keys and mouse, the cursor turned into a place in the world.
+// This frame's keys and mouse, the cursor turned into a place in the world. The weapons
+// menu has them first: a click on it is not a shot.
 sample_input :: proc() {
-	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold)
+	mouse_taken := hud.input(&app.hud, &app.game, cursor())
+	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold, !mouse_taken)
 	if app.debug.has_aim do app.input.aim = app.camera.pos + app.debug.aim
 }
 

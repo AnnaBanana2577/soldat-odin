@@ -38,5 +38,5 @@ die :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 	s.deaths += 1
 	if hit.shooter != hit.target do w.soldiers[hit.shooter].kills += 1
 	else if s.kills > 0 do s.kills -= 1
-	emit(events, Kill{killer = hit.shooter, target = hit.target, weapon = hit.weapon, pos = s.pos, health = s.health, part = hit.part})
+	emit(events, Kill{killer = hit.shooter, target = hit.target, weapon = hit.weapon, pos = s.pos, health = s.health, part = hit.part, kills = w.soldiers[hit.shooter].kills})
 }
