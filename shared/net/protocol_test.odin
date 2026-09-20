@@ -78,7 +78,7 @@ bad_input_refused :: proc(t: ^testing.T) {
 	sent, back := new(Message), new(Message)
 	defer free(sent)
 	defer free(back)
-	in_ := Input{view_tick = 50, count = 2}
+	in_ := Input{view_tick = 50, first = 7, count = 2}
 	in_.cmds[0] = {seq = 7, buttons = {.Left, .Fire}, aim = {5, 6}}
 	in_.cmds[1] = {seq = 8, buttons = {.Jet}, aim = {7, 8}}
 	sent^ = in_

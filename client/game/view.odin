@@ -3,97 +3,148 @@ package game
 import "../../shared/net"
 import "../../shared/sim"
 
-// The others, as this client shows them: at a server tick a little in the past, the
-// view tick. Each tick the view moves one tick on and every other soldier is guessed
-// on with it from its last known controls (sim.soldier_reckon, the guess the server
-// and every other client make too); then the server's word, when it comes, replaces
-// the guess. The view tick is told to the server with every packet, and the server
-// judges my shots against the soldiers of that tick: what I am shown is what I hit.
+// The others, as this client shows them: at a tick a little behind the newest word the
+// server has sent, so that for every moment drawn there is a word before it and a word
+// after it, and the two are drawn between. Nothing about them is guessed, and so nothing
+// about them is ever taken back.
 //
-// The clock follows the promptest updates: one that comes ahead of the view pulls it
-// forward at once, and the rest, held up on the line, are guessed on the ticks they
-// are behind. Should even the promptest come late for a whole second, the line has
-// grown longer, and the view waits a tick.
+// The tick shown is the tick every packet tells the server, and the tick the server
+// rewinds to when it judges what I fired (sim/history.odin): what I shoot at is what I
+// saw. How far behind it sits follows the line, a few ticks at a time: far enough that
+// the next word has always come, and no further.
 //
-// Where the server's word lands a soldier away from where it was drawn, the difference
-// becomes an offset that blends out, so a correction glides instead of snapping.
+// A word that never comes (a soldier out of view is told of twice a second, and packets
+// are lost) is guessed forward from the last for a moment; a gap longer than that, or a
+// soldier the server has just placed, is shown where it is next heard of.
 View :: struct {
-	tick:      u32, // the server tick the others are shown at
-	window:    int, // ticks into this second
-	least_age: u32, // how late the promptest update of this second came, in ticks
-	drawn: [sim.MAX_PLAYERS]sim.Vec2, // where each soldier was drawn when the last tick ended
-	prev:  [sim.MAX_PLAYERS]sim.Vec2, // where its step of this tick began: drawn from here to pos
-	err:   [sim.MAX_PLAYERS]sim.Vec2, // the drawn offset, blending out
+	samples: [sim.MAX_PLAYERS][SAMPLES]Sample, // each soldier as it was told of, by tick
+	written: [sim.MAX_PLAYERS]int,             // how many have been written: the ring's head
+	newest:  u32, // the newest tick heard of
+	tick:    u32, // the tick the others are shown at
+	behind:  int, // how far behind the newest that is, in ticks
+	least:   int, // the fewest ticks of word ahead of the shown tick this second
+	window:  int, // ticks into that second
+	prev:    [sim.MAX_PLAYERS]sim.Vec2, // where each was shown a tick ago, for drawing between ticks
 }
 
-NEVER_LATE   :: max(u32)
-VIEW_WINDOW  :: sim.TICK_RATE
-MAX_CATCH_UP :: 12   // ticks a late word is guessed on at most
-ERR_SNAP     :: 60.0 // further than this from where it was drawn, a soldier jumps
-ERR_DECAY    :: 0.88 // share of the offset kept per tick
-ERR_RATE     :: 1.0  // and at least this many units gone per tick
+Sample :: struct {
+	tick:    u32,
+	held:    bool,
+	soldier: sim.Soldier,
+}
+
+SAMPLES        :: 24  // words kept for each soldier: a second of them at 30 a second
+BEHIND_LEAST   :: 3   // never nearer the newest word than this
+BEHIND_MOST    :: 20
+GAP_SNAP       :: 15  // ticks between two words beyond which the soldier is shown at the newer
+GUESS_MOST     :: 6   // ticks a missing newer word is guessed forward at most: a tenth of a second
+WINDOW         :: sim.TICK_RATE // how often how far behind to sit is reconsidered
 
 view_init :: proc(v: ^View) {
-	v^ = {least_age = NEVER_LATE}
+	v^ = {behind = 2 * OTHERS_EVERY, least = max(int)}
 }
 
-// One tick on: the clock, and everyone but `me` guessed on with it.
-view_advance :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, me: u8) {
-	waits := false
-	v.window += 1
-	if v.window >= VIEW_WINDOW {
-		waits = v.least_age != NEVER_LATE && v.least_age > 0
-		v.window, v.least_age = 0, NEVER_LATE
-	}
-	if !waits do v.tick += 1
+OTHERS_EVERY :: 2 // ticks between the server's words of the others (server/game.odin)
 
-	scratch: sim.Events // what their steps would cause is the server's to say
-	for &s, i in w.soldiers {
-		if u8(i) == me || !s.active || s.dead do continue
-		v.drawn[i] = s.pos + v.err[i]
-		v.prev[i] = s.pos
-		if !waits {
-			sim.events_clear(&scratch)
-			sim.soldier_reckon(ctx, w, u8(i), &scratch)
-		}
-		e := &v.err[i]
-		if l := sim.vec2_length(e^); l > 0 {
-			kept := min(l * ERR_DECAY, l - ERR_RATE)
-			e^ = kept <= 0 ? {} : e^ * (kept / l)
-		}
-	}
-}
-
-// An update of `tick` is in: the clock never runs behind the news.
+// An update of `tick` is in: the shown tick never runs ahead of the news.
 view_heard :: proc(v: ^View, tick: u32) {
-	if tick > v.tick do v.tick = tick
-	v.least_age = min(v.least_age, v.tick - tick)
+	v.newest = max(v.newest, tick)
 }
 
-// The server's word on a soldier as of `tick`, over the guess: brought on to the view
-// tick, and drawn on from where the guess was drawn.
-view_receive :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, e: ^net.Entry, tick: u32) {
-	s := &w.soldiers[e.slot]
-	was_shown := s.active && !s.dead
-	sim.soldier_copy_served(s, &e.soldier)
-	if !e.has_owned do return
-	sim.soldier_copy_owned(ctx.anims, s, &e.soldier)
-	scratch: sim.Events
-	for _ in 0 ..< min(v.tick - tick, MAX_CATCH_UP) {
-		sim.events_clear(&scratch)
-		sim.soldier_reckon(ctx, w, e.slot, &scratch)
-	}
-	v.prev[e.slot] = s.pos - s.vel
-	off := v.drawn[e.slot] - v.prev[e.slot]
-	v.err[e.slot] = was_shown && sim.vec2_length(off) <= ERR_SNAP ? off : {}
+// A soldier as the server had it at `tick`, kept to be shown when the shown tick
+// reaches it.
+view_receive :: proc(v: ^View, e: ^net.Entry, tick: u32) {
+	slot := int(e.slot)
+	at := v.written[slot] % SAMPLES
+	v.samples[slot][at] = {tick = tick, held = true, soldier = e.soldier}
+	v.written[slot] += 1
 }
 
-// A soldier the server has just placed: drawn there at once, not glided to.
+// A soldier the server has just placed: what was heard of it before says nothing about
+// where it is now, so it is shown where it is next heard of.
 view_place :: proc(v: ^View, slot: u8, pos: sim.Vec2) {
-	v.prev[slot], v.drawn[slot], v.err[slot] = pos, pos, {}
+	v.samples[slot] = {}
+	v.written[slot] = 0
+	v.prev[slot] = pos
+}
+
+// One tick on: the shown tick, and every other soldier put where the words around that
+// tick have it.
+view_advance :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, me: u8) {
+	view_clock(v)
+	for &s, i in w.soldiers {
+		if u8(i) == me do continue
+		v.prev[i] = s.pos
+		before, after := view_around(v, i, v.tick)
+		if before == nil && after == nil do continue
+		if before == nil { // only word of it is still to come: hold where it was
+			v.prev[i] = after.soldier.pos
+			view_show(ctx, &s, after, after, 0)
+			continue
+		}
+		if after == nil { // no newer word: guess it on a moment, then hold
+			ticks := min(int(v.tick - before.tick), GUESS_MOST)
+			view_show(ctx, &s, before, before, 0)
+			s.pos += s.vel * f32(ticks)
+			continue
+		}
+		span := f32(after.tick - before.tick)
+		if span > GAP_SNAP { // a gap: the newer word rather than a long slide to it
+			view_show(ctx, &s, after, after, 0)
+			continue
+		}
+		view_show(ctx, &s, before, after, f32(v.tick - before.tick) / span)
+	}
+}
+
+// The shown tick: one on per tick, and held so far behind the newest word that a word
+// after it has always come. Out of reach of the news it takes its place from them.
+@(private = "file")
+view_clock :: proc(v: ^View) {
+	v.tick += 1
+	ahead := int(v.newest) - int(v.tick)
+	if ahead < -BEHIND_MOST || ahead > BEHIND_MOST + v.behind { // lost the thread: take it up again
+		v.tick = v.newest > u32(v.behind) ? v.newest - u32(v.behind) : 0
+		v.least, v.window = max(int), 0
+		return
+	}
+
+	v.least = min(v.least, ahead)
+	v.window += 1
+	if v.window < WINDOW do return
+	// a second with a moment of nothing ahead sits further back; a second with plenty
+	// to spare the whole way sits nearer
+	if v.least < 1 do v.behind = min(v.behind + 2, BEHIND_MOST)
+	else if v.least > OTHERS_EVERY do v.behind = max(v.behind - 1, BEHIND_LEAST)
+	if ahead < v.behind - 2 do v.tick -= 1 // and wait a tick for the news to catch up
+	v.least, v.window = max(int), 0
+}
+
+// The two words around `tick`: the newest at or before it, and the oldest after it.
+@(private = "file")
+view_around :: proc(v: ^View, slot: int, tick: u32) -> (before, after: ^Sample) {
+	for &s in v.samples[slot] {
+		if !s.held do continue
+		if s.tick <= tick && (before == nil || s.tick > before.tick) do before = &s
+		if s.tick > tick && (after == nil || s.tick < after.tick) do after = &s
+	}
+	return
+}
+
+// A soldier as it stands between two words of it: where it is between the two, and the
+// rest as the older has it, since what it holds and how it moves changes in steps.
+@(private = "file")
+view_show :: proc(ctx: ^sim.Context, s: ^sim.Soldier, before, after: ^Sample, part: f32) {
+	s^ = before.soldier
+	if s.legs.speed == 0 do sim.anim_set(ctx.anims, &s.legs, s.legs.id, s.legs.frame)
+	if s.body.speed == 0 do sim.anim_set(ctx.anims, &s.body, s.body.id, s.body.frame)
+	if part <= 0 do return
+	s.pos = before.soldier.pos + (after.soldier.pos - before.soldier.pos) * part
+	s.vel = before.soldier.vel + (after.soldier.vel - before.soldier.vel) * part
+	s.aim = before.soldier.aim + (after.soldier.aim - before.soldier.aim) * part
 }
 
 // Where one of the others is drawn, `alpha` of the way into the tick.
 view_drawn_pos :: proc(v: ^View, w: ^sim.World, slot: int, alpha: f32) -> sim.Vec2 {
-	return v.prev[slot] + (w.soldiers[slot].pos - v.prev[slot]) * alpha + v.err[slot]
+	return v.prev[slot] + (w.soldiers[slot].pos - v.prev[slot]) * alpha
 }

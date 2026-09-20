@@ -47,8 +47,9 @@ RELIABLE := [Msg_Kind]bool {
 	.Update = false, .Things = true, .Facts = true,
 }
 
-MAX_CMDS_PER_INPUT   :: 12 // the unrun commands repeat in every packet: a fifth of a second
+MAX_CMDS_PER_INPUT   :: 32 // the unrun commands repeat in every packet: half a second of them
 MAX_SHOTS_PER_UPDATE :: 64
+MAX_ENDS_PER_UPDATE  :: 16
 MAX_THINGS_PER_MSG   :: 12
 MAX_FACTS_PER_MSG    :: 16
 
@@ -118,6 +119,7 @@ Roster :: struct {
 // costs nothing.
 Input :: struct {
 	view_tick: u32,
+	first:     u32, // the number of the first command; they run one per tick from there
 	cmds:      [MAX_CMDS_PER_INPUT]sim.Command,
 	count:     int,
 }
@@ -163,6 +165,15 @@ Fired :: struct {
 	pos, vel: sim.Vec2,
 }
 
+// Where a bullet of the receiver's own ended, by the number its owner gave it
+// (sim.Bullet.shot_id). Its client flew that bullet itself, from the same command; this
+// is the server's word on where it stopped, which is where it was ruled to hit or miss.
+End :: struct {
+	shot:   u32,
+	pos:    sim.Vec2,
+	impact: bool,
+}
+
 // The world at `tick`. `active` has a bit for every slot in play; a soldier in play
 // but not among the entries is out of the receiver's view, and heard of now and then.
 // `lags` has for every slot in play how late the server finds its player sees the world,
@@ -180,6 +191,8 @@ Update :: struct {
 	entry_count: int,
 	fired:       [MAX_SHOTS_PER_UPDATE]Fired,
 	fired_count: int,
+	ends:        [MAX_ENDS_PER_UPDATE]End,
+	end_count:   int,
 }
 
 #assert(sim.MAX_PLAYERS <= 32) // a bit each in Update.active
@@ -269,6 +282,7 @@ ser_served :: proc(s: ^Stream, v: ^sim.Soldier) {
 	ser_u8(s, &v.death_part)
 	ser_u64(s, &v.rng)
 	ser_u32(s, &v.cmd_seq)
+	ser_u32(s, &v.shot_count)
 	ser_u8(s, &v.view_lag)
 	ser_enum(s, &v.primary_choice)
 	ser_enum(s, &v.secondary_choice)
@@ -301,8 +315,9 @@ ser_rest :: proc(s: ^Stream, v: ^sim.Soldier) {
 	ser_as(s, &v.body.count, u8)
 }
 
+// A command without its number: they are consecutive, so the packet carries the first
+// and the rest follow from it.
 ser_cmd :: proc(s: ^Stream, v: ^sim.Command) {
-	ser_u32(s, &v.seq)
 	ser_buttons(s, &v.buttons)
 	ser_vec2(s, &v.aim)
 }
@@ -453,8 +468,12 @@ ser_roster :: proc(s: ^Stream, m: ^Roster) {
 
 ser_input :: proc(s: ^Stream, m: ^Input) {
 	ser_u32(s, &m.view_tick)
+	ser_u32(s, &m.first)
 	ser_count(s, &m.count, MAX_CMDS_PER_INPUT)
-	for i in 0 ..< m.count do ser_cmd(s, &m.cmds[i])
+	for i in 0 ..< m.count {
+		ser_cmd(s, &m.cmds[i])
+		if !s.writing do m.cmds[i].seq = m.first + u32(i)
+	}
 }
 
 ser_chat :: proc(s: ^Stream, m: ^Chat) {
@@ -494,6 +513,13 @@ ser_update :: proc(s: ^Stream, m: ^Update) {
 	}
 	ser_count(s, &m.fired_count, MAX_SHOTS_PER_UPDATE)
 	for i in 0 ..< m.fired_count do ser_fired(s, &m.fired[i])
+	ser_count(s, &m.end_count, MAX_ENDS_PER_UPDATE)
+	for i in 0 ..< m.end_count {
+		e := &m.ends[i]
+		ser_u32(s, &e.shot)
+		ser_vec2(s, &e.pos)
+		ser_bool(s, &e.impact)
+	}
 }
 
 ser_things :: proc(s: ^Stream, m: ^Things) {

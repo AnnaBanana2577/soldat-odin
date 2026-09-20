@@ -31,7 +31,7 @@ Event :: union {
 
 Fire :: struct { player: u8, weapon: Weapon_Id, pos, vel: Vec2 }
 Bullet_Spawn :: struct { id: u16, player: u8, weapon: Weapon_Id, pos, vel: Vec2, damage: f32 }
-Bullet_End :: struct { id: u16, owner: u8, weapon: Weapon_Id, pos: Vec2, impact: bool }
+Bullet_End :: struct { id: u16, owner: u8, shot: u32, weapon: Weapon_Id, pos: Vec2, impact: bool }
 Wall_Hit :: struct { id: u16, owner: u8, weapon: Weapon_Id, pos, vel: Vec2 }
 Ricochet :: struct { id: u16, owner: u8, pos, vel: Vec2 }
 Collider_Hit :: struct { id: u16, owner: u8, pos, vel: Vec2 }

@@ -72,6 +72,7 @@ Game :: struct {
 }
 
 MAX_FAST_FORWARD :: 40 // ticks another's bullet is flown on at most when it is heard of
+PENDING_KEPT     :: 64 // commands kept waiting for the server's word on them: a second
 
 // The sim's data every map shares, read from `base`, and an empty world for slot `me`.
 init :: proc(g: ^Game, base: string, me: u8) -> bool {
@@ -183,9 +184,10 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 	}
 	for &e in m.entries[:m.entry_count] {
 		if e.slot == g.me do reconcile(g, &e, m.tick, m.ack)
-		else do view_receive(&g.view, &g.ctx, &g.world, &e, m.tick)
+		else do view_receive(&g.view, &e, m.tick)
 	}
 	for &f in m.fired[:m.fired_count] do receive_fired(g, &f, m.tick)
+	for &e in m.ends[:m.end_count] do receive_end(g, &e)
 }
 
 // Another's bullet, flown on from its birth to where it is for me. The server judges
@@ -200,6 +202,18 @@ receive_fired :: proc(g: ^Game, f: ^net.Fired, update_tick: u32) {
 	if !ok do return
 	since := int(g.view.tick - update_tick) + int(f.age)
 	sim.bullet_fast_forward(&g.ctx, &g.world, index, min(since + int(f.lag) + g.my_lag, MAX_FAST_FORWARD), &g.events)
+}
+
+// Where one of my own bullets ended. I flew it myself from the same command, so it is
+// usually where mine is anyway; where the server saw something I did not (a soldier my
+// copy passed through), mine stops there too, and its spark is where the server put it.
+receive_end :: proc(g: ^Game, e: ^net.End) {
+	for &b, i in g.world.bullets {
+		if !b.active || b.owner != g.me || b.shot_id != e.shot do continue
+		if e.impact do b.pos = e.pos
+		sim.bullet_end(&g.world, &b, u16(i), &g.events, e.impact ? e.pos : nil)
+		return
+	}
 }
 
 // What the server decided. It sounds and shows like anything else that happened. A
@@ -266,7 +280,9 @@ step_mine :: proc(g: ^Game, in_: ^input.Input) {
 	g.seq += 1
 	cmd := input.command(in_, g.seq)
 	append(&g.pending, cmd)
-	if len(g.pending) > net.MAX_CMDS_PER_INPUT do ordered_remove(&g.pending, 0) // it will never hear of these
+	// a second of them: a client further behind than that has lost its place anyway, and
+	// dropping one the server has not run yet would leave my replay short of it
+	if len(g.pending) > PENDING_KEPT do ordered_remove(&g.pending, 0)
 	if !mine.active || mine.dead do return
 	before := g.events.count
 	sim.soldier_step(&g.ctx, &g.world, g.me, cmd, &g.events)
@@ -283,16 +299,15 @@ step_world :: proc(g: ^Game) {
 	sim.things_update(&g.ctx, &g.world, &g.events)
 	sim.bullets_update(&g.ctx, &g.world, &g.events)
 	g.world.tick += 1
-	mine := &g.world.soldiers[g.me]
+	// A hit here is blood and a sound and nothing else, my own included: the wound is the
+	// server's to give and so is the shove, which arrives with my soldier. Shoving myself
+	// where I see the bullet land would be a guess at a tick the server has not reached,
+	// and every such guess is a correction to swallow.
 	for e in sim.events_slice(&g.events) {
 		hit, is_hit := e.(sim.Hit)
 		if !is_hit do continue
-		if hit.target == g.me {
-			mine.next_push += hit.push
-			if hit.shooter != g.me && wounds(g, hit.shooter, g.me) do g.hits_taken += 1
-		} else if hit.shooter == g.me && wounds(g, g.me, hit.target) {
-			g.hits_given += 1
-		}
+		if hit.target == g.me && hit.shooter != g.me && wounds(g, hit.shooter, g.me) do g.hits_taken += 1
+		else if hit.shooter == g.me && hit.target != g.me && wounds(g, g.me, hit.target) do g.hits_given += 1
 	}
 }
 
@@ -310,7 +325,8 @@ wounds :: proc(g: ^Game, shooter, target: u8) -> bool {
 // costs nothing, and the tick I show the others at; what I chose and what I said, once.
 send :: proc(g: ^Game, conn: ^connection.Connection) {
 	m := net.Input{view_tick = g.view.tick}
-	for cmd in g.pending {
+	if len(g.pending) > 0 do m.first = g.pending[0].seq
+	for cmd in g.pending { // the oldest first: the server runs them in order
 		if m.count == net.MAX_CMDS_PER_INPUT do break
 		m.cmds[m.count] = cmd
 		m.count += 1

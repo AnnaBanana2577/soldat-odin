@@ -14,9 +14,9 @@
 //
 // Who runs what. Every machine runs this same simulation on its own world, and one
 // flag on the world, authority, marks the server's: the one that decides.
-//   - A soldier's player steps it (soldier_step): a client its own, the server its
-//     bots. Every machine guesses everyone else on from what it last heard
-//     (soldier_reckon), the server too, until their player's word replaces the guess.
+//   - The server steps every soldier (soldier_step), on the commands its client sent or
+//     on its bot's brain. A client steps its own the same way, on the same commands, to
+//     predict it; the others it draws from the server's word and never steps.
 //   - Every machine flies every bullet and moves every thing, so the blood, the sparks
 //     and the sounds are local everywhere.
 //   - Only with authority do hits become wounds (damage_apply), are things made, taken,

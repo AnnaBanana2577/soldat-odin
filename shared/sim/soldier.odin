@@ -12,11 +12,11 @@ Stance :: enum u8 { Stand, Crouch, Prone }
 
 Bonus :: enum u8 { None, Flame_God, Predator, Berserker }
 
-// A soldier has two owners. Where it is and what it does is its player's to say: the
-// client that plays it steps it (soldier_step) and everyone else guesses it on from
-// what they last heard (soldier_reckon). Whether it lives, and what it has won, is the
-// server's (soldier_served_tick, damage_apply). On the wire the two halves are
-// net.ser_owned and net.ser_served.
+// A soldier is run in one place at a time: the server runs them all, on the commands
+// their clients sent, and a client runs its own as well to predict it. Everyone else
+// draws them from the server's word alone (client/game/view.odin). What a soldier's
+// player decides and what the server decides are kept apart all the same, because the
+// server sends the parts separately: net.ser_owned (and ser_rest) against ser_served.
 Soldier :: struct {
 	// the server's
 	active: bool,
@@ -32,6 +32,7 @@ Soldier :: struct {
 	death_part: u8,
 	rng:      u64, // its own randomness (the spread of its shots), rolled where it is played
 	cmd_seq:  u32, // the command it last ran: what its bullets are stamped with
+	shot_count: u32, // bullets it has fired: each is stamped with its number, on every machine alike
 
 	// owned by the client that plays it
 	pos, old_pos:  Vec2,
@@ -143,8 +144,8 @@ soldier_integrate :: proc(s: ^Soldier, gravity: f32) {
 // One tick of one soldier, in the original's order: integrate, take the knockback,
 // the controls through the state machines, animate, collide with the map, the
 // weapon timers, the jet fuel. Everything here is its player's half; the server's
-// half ticks in soldier_served_tick. `armed` is false for a guess, which moves the
-// soldier and leaves its weapon alone (soldier_reckon).
+// half ticks in soldier_served_tick. `armed` is false where a soldier is moved without
+// its player behind it, which leaves its weapon alone.
 soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: ^Events, armed := true) {
 	s := &w.soldiers[index]
 	if !s.active || s.dead do return
@@ -186,21 +187,6 @@ soldier_out_of_bounds :: proc(ctx: ^Context, pos: Vec2) -> bool {
 // Suicide is a hit on oneself, applied like any other, and a brutal one.
 suicide_hit :: proc(w: ^World, index: u8) -> Hit {
 	return {shooter = index, target = index, amount = 4 * DEFAULT_HEALTH, pos = w.soldiers[index].pos}
-}
-
-// Buttons a guessed soldier never presses: the presses outside the weapon code that
-// count once, and would count again every tick they were guessed held.
-NEVER_RECKONED :: Buttons{.Prone, .Suicide, .Flag_Throw}
-
-// One tick of a soldier nobody is playing here: its last known controls held on, and
-// its weapon left alone. Every machine does this for every soldier but its own, the
-// server included, so all of them make the same guess until its player's word
-// replaces it. Unarmed, because what a weapon does is its player's to say and arrives
-// as bullets; and a guess at it goes wrong at once: with the keys it never holds let
-// go, a grenade being wound up looks released, every tick.
-soldier_reckon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
-	s := &w.soldiers[index]
-	soldier_step(ctx, w, index, Command{buttons = s.controls - NEVER_RECKONED, aim = s.aim}, events, armed = false)
 }
 
 // The server's half of a soldier's tick, whoever moves it: the way back from death and
@@ -250,6 +236,7 @@ soldier_copy_served :: proc(dst, src: ^Soldier) {
 	dst.kills, dst.deaths, dst.flags = src.kills, src.deaths, src.flags
 	dst.death_vel, dst.death_part = src.death_vel, src.death_part
 	dst.rng, dst.cmd_seq, dst.view_lag = src.rng, src.cmd_seq, src.view_lag
+	dst.shot_count = src.shot_count
 	dst.primary_choice, dst.secondary_choice = src.primary_choice, src.secondary_choice
 }
 

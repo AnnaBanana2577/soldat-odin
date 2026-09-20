@@ -43,6 +43,7 @@ Game :: struct {
 	map_name:   string,
 	clients:    [sim.MAX_PLAYERS]Client,
 	born:       [dynamic]Born,            // the bullets born lately, each told a few updates running
+	ends:       [dynamic]Ended,           // and where the clients' own ended, told back to them
 	shot_seq:   [sim.MAX_PLAYERS]u32,     // the last number given to each shooter's bullets
 	things_sent: [sim.MAX_THINGS]sim.Thing, // as the clients last heard them
 
@@ -68,6 +69,13 @@ Client :: struct {
 	// for the leave line: the hits it gave and took as ruled here, which its own summary
 	// has as it saw them; `judged` sums how far back its shots were ruled
 	shots, hits_given, hits_taken, judged: int,
+}
+
+// Where a client's own bullet ended, kept while it is being told to that client.
+Ended :: struct {
+	owner: u8,
+	end:   net.End,
+	tick:  u32,
 }
 
 // The birth of a bullet, kept while it is being told.
@@ -395,6 +403,9 @@ step_world :: proc(g: ^Game) {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, w, hit, &g.events)
 	}
 	for e in sim.events_slice(&g.events) {
+		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && g.clients[v.owner].bot == nil {
+			append(&g.ends, Ended{owner = v.owner, end = {shot = v.shot, pos = v.pos, impact = v.impact}, tick = g.world.tick})
+		}
 		if v, wounded := e.(sim.Damage); wounded && v.attacker != v.target {
 			g.clients[v.attacker].hits_given += 1
 			g.clients[v.target].hits_taken += 1
@@ -409,6 +420,7 @@ send :: proc(g: ^Game, host: ^Host) {
 	send_facts(g, host)
 	send_updates(g, host)
 	for len(g.born) > 0 && g.world.tick - g.born[0].tick >= BORN_TOLD do ordered_remove(&g.born, 0)
+	for len(g.ends) > 0 && g.world.tick - g.ends[0].tick >= BORN_TOLD do ordered_remove(&g.ends, 0)
 	host_flush(host)
 }
 
@@ -496,6 +508,11 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 			m.fired[m.fired_count] = b.fired
 			m.fired[m.fired_count].age = u8(w.tick - b.tick)
 			m.fired_count += 1
+		}
+		for &e in g.ends {
+			if int(e.owner) != ri || m.end_count == net.MAX_ENDS_PER_UPDATE do continue
+			m.ends[m.end_count] = e.end
+			m.end_count += 1
 		}
 		send_message(g, host, u8(ri))
 	}

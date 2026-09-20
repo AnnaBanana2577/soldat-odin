@@ -12,11 +12,12 @@ The shape of an Odin port on raylib and ENet, and its netcode, which is five rul
    simulation and one flag on the world, authority, marks the one whose word counts.
 3. **A bullet crosses the wire once, at birth,** and flies on every machine from
    there, so the blood, the sparks and the sounds are local and at once.
-4. **Everyone sees the others a little in the past, and the bullets are moved to
-   match.** The server judges a bullet against the soldiers as its shooter saw them
-   (it rewinds), so what you aim at is what you hit. The other clients fly that bullet
-   forward by the shooter's lag plus their own, so the bullet you see coming is the
-   one that will be ruled on, and you can dodge it.
+4. **Everyone sees the others a little in the past, drawn between two of the server's
+   words rather than guessed, and the bullets are moved to match.** The server judges a
+   bullet against the soldiers as its shooter saw them (it rewinds to the tick that
+   client says it is showing), so what you aim at is what you hit. The other clients fly
+   that bullet forward by the shooter's lag plus their own, so the bullet you see coming
+   is the one that will be ruled on, and you can dodge it.
 5. **State is sent over and over, unreliably; news is sent once, reliably.** My
    commands and where the soldiers are go in every packet and the next one replaces
    them. A death, a respawn,
@@ -39,7 +40,8 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   connection/  the link to the server, the simulated bad line
   game/        the world: game (the tick: receive / step / send), predict (my own
                soldier: the replay, the error blending out, the clock), view (the
-               others: the view tick, the guessing on, the blending of corrections)
+               others: the words kept of each, the tick they are shown at, the drawing
+               between two of them)
   input/       input (the keys and mouse), script (the headless client's)
   render/      render (the world's picture, the map's meshes), camera, textures,
                gostek, bullet_art, things_art, sparks, sprite
@@ -185,6 +187,9 @@ Y to your team; Enter sends it, Esc lets it go.
   - The client runs its clock a shade faster or slower to keep about two commands
     waiting on the server: enough to ride out jitter, not enough to be felt. Every
     update carries the last command the server ran and how many were waiting.
+  - My own bullets stay on my own timeline: I fired them from the same command the
+    server did, so they are usually where its are anyway. When the server says where one
+    ended, mine ends there too, which is where it was ruled to hit or miss.
   - Prediction is only as good as what the server's word covers, so an update carries
     the receiver's own soldier whole, every tick, and a test holds the wire's three
     parts (served, owned, rest) to the whole soldier, so no field can quietly drift
@@ -217,9 +222,10 @@ Y to your team; Enter sends it, Esc lets it go.
     only the server could decide goes out as a fact (Facts), and sounds and shows like
     anything else that happened; what a pickup gives of the things a client owns (a
     gun, grenades) the client gives itself on hearing of it.
-  - Time. A client shows the others at a view tick: the newest update's, moved on a
-    tick per tick, each soldier guessed on when its word is late and blended to the
-    truth when it comes (client/game/view.odin). Every Input names that tick, and the
+  - Time. A client shows the others at a view tick a few ticks behind the newest word
+    of them, drawn between the two words around it, so nothing about them is guessed and
+    nothing taken back; how far behind follows the line, three ticks on a good one
+    (client/game/view.odin). Every Input names that tick, and the
     difference from the tick it arrives in is the client's lag, measured per packet. A
     bullet keeps the lag of the packet it came in and meets the soldiers as they were
     that long ago (sim/history.odin), for as long as it flies, up to a cap (-max-rewind
@@ -227,8 +233,9 @@ Y to your team; Enter sends it, Esc lets it go.
     ticks since its birth, its shooter's lag and their own: the server will rule it
     against me as I was my own lag ago, so the bullet that will be ruled to hit me is
     that far ahead of the one the server spawned. Soldat's rule: my ping plus the
-    shooter's. The shove of a hit on me is felt here, from my own copy of the bullet,
-    the moment I see it land; the wound is the server's.
+    shooter's. The shove of a hit on me comes with the server's word on my soldier,
+    as the wound does: shoving myself where I see the bullet land would be a guess at a
+    tick the server has not reached.
   - Lives. The server places a soldier (a spawn, a respawn, a correction) and each
     placing begins a new life, numbered. A client says which life its word is of and
     takes the server's word of its own soldier only for the life it is living, so word
@@ -240,15 +247,15 @@ Y to your team; Enter sends it, Esc lets it go.
     out of range, counts too large and bytes left over (shared/net/protocol_test.odin).
   - ENet only sends what it was given when it is next pumped, a tick later; both ends
     flush at the end of their tick, which took two ticks off everyone's lag.
-  - Measured with the headless client. Prediction: on a clean line the client's own
-    soldier sits 0.00 units from the server's on average (0.18 at worst) over 1800
-    updates; under 30% packet loss at 200 ms it is 0.03, and under 50% loss at 300 ms
-    0.06, which is the starved-queue rule doing its work. In a fight on a 120 ms line
-    with 5% loss it is 0.42, nearly all of it the knockback of a hit landing a tick or
-    two from where the server put it. Hits: on a clean line what the client saw itself
-    give and what the server ruled are the same; on the 120 ms line with 5% loss 22 of
-    the 26 it saw were ruled, and 19 of the 20 it saw itself take. 10 KB/s up (the
-    unrun commands repeat every tick) and 16 KB/s down with six soldiers in view.
+  - Measured with the headless client against five dodging bots on Arena, ninety
+    seconds a run. Prediction: in a fight on a clean line the client's own soldier sits
+    0.00 units from the server's on average (0.34 at worst) over 5000 updates, and 0.10
+    on a 120 ms line with 5% loss. Under 30% packet loss at 200 ms it is 0.03, and under
+    50% loss at 300 ms 0.06: the starved-queue rule doing its work. Hits: on the clean
+    line 21 of the 21 it saw itself give were ruled, and 10 of the 11 it took; on the
+    120 ms line 14 of 15 given and 22 of 24 taken. The others sit three ticks behind the
+    newest word of them. 3 KB/s up on a clean line (8 when the unrun commands pile up)
+    and 30 KB/s down with six soldiers in view.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg

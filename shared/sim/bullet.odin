@@ -16,6 +16,7 @@ Bullet :: struct {
 	owner:          u8,
 	lag:            u8, // ticks behind the present it meets the soldiers, as its shooter saw them
 	spawn_cmd:      u32, // the command of its owner that fired it: what a client replays it from
+	shot_id:        u32, // its owner's count of its bullets: the same number on every machine
 	pos, old_pos:   Vec2,
 	vel, forces:    Vec2,
 	initial:        Vec2, // where it was fired: the damage falls off from here
@@ -46,9 +47,10 @@ bullet_spawn :: proc(ctx: ^Context, w: ^World, pos, vel: Vec2, weapon: Weapon_Id
 	for &b, i in w.bullets {
 		if b.active do continue
 		info := &ctx.weapons[weapon]
+		w.soldiers[owner].shot_count += 1
 		b = {
 			active = true, style = info.style, weapon = weapon, owner = owner, lag = w.soldiers[owner].view_lag,
-			spawn_cmd = w.soldiers[owner].cmd_seq,
+			spawn_cmd = w.soldiers[owner].cmd_seq, shot_id = w.soldiers[owner].shot_count,
 			pos = pos, old_pos = pos, vel = vel, initial = pos,
 			timeout = info.timeout, hit_multiply = damage, hit_body = -1,
 		}
@@ -63,7 +65,7 @@ bullet_spawn :: proc(ctx: ^Context, w: ^World, pos, vel: Vec2, weapon: Weapon_Id
 bullet_end :: proc(w: ^World, b: ^Bullet, index: u16, events: ^Events, impact: Maybe(Vec2) = nil) {
 	if !b.active do return
 	b.active = false
-	e := Bullet_End{id = index, owner = b.owner, weapon = b.weapon, pos = b.pos}
+	e := Bullet_End{id = index, owner = b.owner, shot = b.shot_id, weapon = b.weapon, pos = b.pos}
 	if p, ok := impact.?; ok do e.pos, e.impact = p, true
 	emit(events, e)
 }

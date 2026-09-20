@@ -5,27 +5,26 @@ rules, at the top) and what it measured; this says what it does not do yet.
 
 ## Netcode
 
-- The knockback of a hit is predicted where the bullet is seen to land, which is a tick
-  or two from where the server puts it: nearly all of what prediction error is left in
-  a fight. Either take the push from the server alone (late, but exact) or hold the
-  local one to the tick the server will rule it on.
+- The server rewinds to whole ticks, but a client shows the others between two of them,
+  so what it aimed at can be half a tick from what the server rules against. Carrying
+  the fraction in the Input would close it.
+- The knockback of a hit arrives with the server's word on my soldier, so it lands half
+  a round trip after the bullet is seen to. Soldat holds the local shove to the tick the
+  server will rule it on instead; worth trying if it feels late.
 - A burst of commands runs in one tick on the server, but the bullets those commands
   fire are stepped once for that tick, where the client stepped each of them as its own
   tick. A shot fired during a burst therefore trails its client's copy slightly.
 - The client sends every unrun command in every packet: 10 KB/s up at 120 ms. Sending
   only what changed, or capping the repeat, would cut most of it.
-- End a bullet everywhere when the server rules that it hit. A client's copy of
-  another's bullet dies when the client's own world finds the collision, which agrees
-  with the server nine times in ten on a bad line; the tenth flies through someone it
-  was ruled to hit, or stops on someone it missed. The bullets are numbered already
-  (Fired.seq): a line in the Update naming shooter, number and target would do it, and
-  put the blood in the right place.
+- Another's bullet on my screen still dies where my own world finds the collision. Mine
+  end where the server says (net.End); the same could be told for everyone's, which is
+  what is left of the disagreement over hits taken.
 - Fast weapons send every bullet, and a shotgun six. Fine on the wire (a shot is 21
   bytes); Soldat sends none for the minigun and makes them on every machine from the
   Fire key, which would not survive the rewind.
-- The Update sends floats whole. Quantised positions and velocities, and leaving out
-  a weapon that has not changed, would halve the 19.5 KB/s down measured with seven
-  soldiers in view. Only worth it for full servers.
+- The Update sends floats whole, and the receiver's own soldier whole every tick: 30
+  KB/s down with six soldiers in view. Quantising positions and velocities, and sending
+  only what changed since the last update the client acknowledged, is most of a halving.
 - The cap on the rewind (300 ms) and the view's constants (when the clock waits, how
   fast a correction blends out) are first guesses. Try them over a real internet line
   and with a full server.
