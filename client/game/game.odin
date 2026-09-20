@@ -7,20 +7,22 @@ import "../input"
 import "../../shared/net"
 import "../../shared/sim"
 
-// The game as this client plays it. My soldier is mine: stepped here on my keys, never
-// predicted and never corrected, and the server is told where it is. Everyone else is
-// shown a little in the past and guessed on between the server's words (the View).
+// The game as this client plays it. My soldier is stepped here the moment I press a
+// key, on the same commands the server runs it on, and put right over the server's word
+// when one comes (predict.odin). Everyone else is shown a little in the past and guessed
+// on between the server's words (the View).
 // Every bullet flies here and every thing moves here, so the blood, the sparks and the
 // sounds are local and at once; but nobody is wounded here and nothing is taken here.
 // Health, deaths, pickups and scores are the server's word, and arrive. The tick reads
 // the way the server's does (server/game.odin):
 //
 //   view_advance   everyone else one tick on, as guessed
-//   receive        the server's word over the guesses; the bullets others fired, flown
-//                  on to where they are by now; the things; what the server decided
-//   step_mine      my soldier on this tick's keys
+//   receive        the server's word over the guesses and over my own soldier, which my
+//                  unrun commands are replayed on; the bullets others fired, flown on
+//                  to where they are by now; the things; what the server decided
+//   step_mine      my soldier on this tick's keys, which go to the server
 //   step_world     the corpses, the things, every bullet
-//   send           my soldier, the tick I show the others at, my recent shots
+//   send           the commands the server has not run, and the tick I show the others at
 //
 // The game owns what the sim reads and never writes (the map, the animations, the
 // weapons, the things' skeletons). The map is the one the server names, on joining and
@@ -44,15 +46,24 @@ Game :: struct {
 	heard:     [dynamic]net.Chat, // this tick's lines, for the HUD
 	primary, secondary: sim.Weapon_Id, // the weapons I chose, for my next spawn
 
-	shots:     [dynamic]net.Shot, // mine, each riding in a few packets running
-	acts:      [dynamic]net.Act,  // what I did that the server must not miss, to tell once
-	said:      [dynamic]net.Chat, // what I said, to tell once
-	next_shot: u32,
+	pending:   [dynamic]sim.Command, // mine the server has not said it ran: what I replay
+	seq:       u32,                  // my commands are numbered from here
+	acts:      [dynamic]net.Act,     // what I chose, to tell once
+	said:      [dynamic]net.Chat,    // what I said, to tell once
 	seen_shot: [sim.MAX_PLAYERS]u32, // the newest of each shooter's bullets flown here
 	newest:    u32, // the newest update taken: one that comes after a newer one is dropped
 	my_lag:    int, // how late the server finds I see the world, in ticks
 
 	my_prev:     sim.Vec2, // my position a tick ago, for drawing between ticks
+	error:       sim.Vec2, // where the server put me against where I had myself, blending out
+	server_depth: u8,      // my commands waiting there, as the last update reported
+	depth:       f64,      // eased, which my clock steers by
+	time_scale:  f64,      // my tick rate against the server's
+	// what the prediction cost: the error at the last update, the worst and the mean,
+	// which the debug summary reports (it should be nil on a quiet line)
+	error_now, error_worst: f32,
+	error_sum:   f64,
+	error_count: int,
 	shots_fired: int,      // ours, for the HUD
 	// the hits I gave and took as they showed here; the server's leave line has how
 	// many of each it ruled, and the two agreeing is the measure of the netcode
@@ -60,7 +71,6 @@ Game :: struct {
 	incoming:    ^net.Message, // scratch: an Update is too large for the stack
 }
 
-SHOT_REPEATS     :: 3  // packets a shot rides in, so a lost packet loses no shot
 MAX_FAST_FORWARD :: 40 // ticks another's bullet is flown on at most when it is heard of
 
 // The sim's data every map shares, read from `base`, and an empty world for slot `me`.
@@ -76,6 +86,7 @@ init :: proc(g: ^Game, base: string, me: u8) -> bool {
 	g.me = me
 	g.primary, g.secondary = .AK74, .Colt // what the server arms a newcomer with
 	sim.world_init(&g.world, 0)
+	g.time_scale = 1
 	sim.round_init(&g.world.round)
 	view_init(&g.view)
 	g.incoming = new(net.Message)
@@ -88,7 +99,7 @@ destroy :: proc(g: ^Game) {
 	delete(g.missing)
 	free(g.anims)
 	free(g.skeletons)
-	delete(g.shots)
+	delete(g.pending)
 	delete(g.acts)
 	delete(g.said)
 	delete(g.heard)
@@ -102,6 +113,7 @@ tick :: proc(g: ^Game, conn: ^connection.Connection, in_: ^input.Input) {
 	receive(g, conn)
 	step_mine(g, in_)
 	step_world(g)
+	predict_tick(g)
 	send(g, conn)
 }
 
@@ -125,11 +137,6 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 			for i in 0 ..< m.count do g.world.things[m.indices[i]] = m.things[i]
 		case net.Facts:
 			for i in 0 ..< m.count do receive_fact(g, m.events[i])
-		case net.Correction:
-			// the server refused where I said I was: I am where it says, in the life it says
-			mine := &g.world.soldiers[g.me]
-			mine.pos, mine.old_pos, mine.vel, mine.life = m.pos, m.pos, m.vel, m.life
-			g.my_prev = m.pos
 		}
 	}
 }
@@ -165,6 +172,7 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 	g.newest = m.tick
 	g.lags = m.lags
 	g.my_lag = int(m.lags[g.me])
+	g.server_depth = m.depth
 	g.world.round.state = m.round.state
 	g.world.round.time_left = m.round.time_left
 	g.world.round.counter = m.round.counter
@@ -174,18 +182,10 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 		if m.active & (1 << u32(i)) == 0 do s = {}
 	}
 	for &e in m.entries[:m.entry_count] {
-		if e.slot == g.me do receive_own(g, &e)
+		if e.slot == g.me do reconcile(g, &e, m.tick, m.ack)
 		else do view_receive(&g.view, &g.ctx, &g.world, &e, m.tick)
 	}
 	for &f in m.fired[:m.fired_count] do receive_fired(g, &f, m.tick)
-}
-
-// Of my own soldier I take the server's half: health, death, the flag, the tally. But
-// only of the life I am living: an update from before the server placed me, or from
-// after a placing I have not heard of yet, speaks of another life.
-receive_own :: proc(g: ^Game, e: ^net.Entry) {
-	mine := &g.world.soldiers[g.me]
-	if e.soldier.life == mine.life do sim.soldier_copy_served(mine, &e.soldier)
 }
 
 // Another's bullet, flown on from its birth to where it is for me. The server judges
@@ -257,28 +257,22 @@ name_of :: proc(g: ^Game, slot: u8) -> string {
 
 // ---- the tick ----
 
-// My soldier on this tick's keys, and what of it the server must hear.
+// This tick's keys as a command: kept to replay, sent to the server, and run here at
+// once on my own soldier. What it does there it does here, from the throw of a gun to
+// the bullets it fires, so nothing I press waits for the wire.
 step_mine :: proc(g: ^Game, in_: ^input.Input) {
 	mine := &g.world.soldiers[g.me]
 	g.my_prev = mine.pos
+	g.seq += 1
+	cmd := input.command(in_, g.seq)
+	append(&g.pending, cmd)
+	if len(g.pending) > net.MAX_CMDS_PER_INPUT do ordered_remove(&g.pending, 0) // it will never hear of these
 	if !mine.active || mine.dead do return
-	cmd := input.command(in_)
-	pressed := cmd.buttons - mine.controls // down this tick and not the last
 	before := g.events.count
 	sim.soldier_step(&g.ctx, &g.world, g.me, cmd, &g.events)
 	for e in g.events.items[before:g.events.count] {
-		#partial switch v in e {
-		case sim.Bullet_Spawn:
-			g.next_shot += 1
-			append(&g.shots, net.Shot{id = g.next_shot, weapon = v.weapon, pos = v.pos, vel = v.vel})
-		case sim.Fire:
-			g.shots_fired += 1
-		case sim.Weapon_Drop:
-			if v.thrown do append(&g.acts, net.Act{action = .Throw_Gun, weapon = v.weapon, ammo = v.ammo})
-		}
+		if v, fired := e.(sim.Fire); fired && v.player == g.me do g.shots_fired += 1
 	}
-	if .Suicide in pressed do append(&g.acts, net.Act{action = .Suicide})
-	if .Flag_Throw in pressed && mine.holding_flag do append(&g.acts, net.Act{action = .Throw_Flag})
 }
 
 // The corpses, the things, every bullet. A hit shows here at once, on whoever it is; its
@@ -312,22 +306,15 @@ wounds :: proc(g: ^Game, shooter, target: u8) -> bool {
 
 // ---- sending ----
 
-// My soldier, the tick I show the others at, and my recent shots, every tick; what I
-// did, once.
+// The commands the server has not said it ran, all of them every tick so a lost packet
+// costs nothing, and the tick I show the others at; what I chose and what I said, once.
 send :: proc(g: ^Game, conn: ^connection.Connection) {
-	mine := &g.world.soldiers[g.me]
-	m := net.Input{life = mine.life, view_tick = g.view.tick}
-	if mine.active && !mine.dead {
-		m.has_state = true
-		m.soldier = mine^
+	m := net.Input{view_tick = g.view.tick}
+	for cmd in g.pending {
+		if m.count == net.MAX_CMDS_PER_INPUT do break
+		m.cmds[m.count] = cmd
+		m.count += 1
 	}
-	for &s in g.shots {
-		if m.shot_count == net.MAX_SHOTS_PER_INPUT do break
-		m.shots[m.shot_count] = s
-		m.shot_count += 1
-		s.sends += 1
-	}
-	for len(g.shots) > 0 && g.shots[0].sends >= SHOT_REPEATS do ordered_remove(&g.shots, 0)
 	connection.send_message(conn, m)
 
 	for a in g.acts do connection.send_message(conn, a)
@@ -347,6 +334,6 @@ drawn_pos :: proc(g: ^Game, slot: int, alpha: f32) -> sim.Vec2 {
 		if r := &g.world.ragdolls[slot]; r.active do return r.old_pos[sim.RAGDOLL_HEAD] + (r.pos[sim.RAGDOLL_HEAD] - r.old_pos[sim.RAGDOLL_HEAD]) * alpha
 		return s.pos
 	}
-	if u8(slot) == g.me do return g.my_prev + (s.pos - g.my_prev) * alpha
+	if u8(slot) == g.me do return g.my_prev + (s.pos - g.my_prev) * alpha + g.error
 	return view_drawn_pos(&g.view, &g.world, slot, alpha)
 }

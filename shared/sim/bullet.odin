@@ -15,6 +15,7 @@ Bullet :: struct {
 	weapon:         Weapon_Id,
 	owner:          u8,
 	lag:            u8, // ticks behind the present it meets the soldiers, as its shooter saw them
+	spawn_cmd:      u32, // the command of its owner that fired it: what a client replays it from
 	pos, old_pos:   Vec2,
 	vel, forces:    Vec2,
 	initial:        Vec2, // where it was fired: the damage falls off from here
@@ -47,6 +48,7 @@ bullet_spawn :: proc(ctx: ^Context, w: ^World, pos, vel: Vec2, weapon: Weapon_Id
 		info := &ctx.weapons[weapon]
 		b = {
 			active = true, style = info.style, weapon = weapon, owner = owner, lag = w.soldiers[owner].view_lag,
+			spawn_cmd = w.soldiers[owner].cmd_seq,
 			pos = pos, old_pos = pos, vel = vel, initial = pos,
 			timeout = info.timeout, hit_multiply = damage, hit_body = -1,
 		}

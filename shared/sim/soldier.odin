@@ -31,6 +31,7 @@ Soldier :: struct {
 	death_vel:  Vec2, // how it died, for the corpse any client starts from this state
 	death_part: u8,
 	rng:      u64, // its own randomness (the spread of its shots), rolled where it is played
+	cmd_seq:  u32, // the command it last ran: what its bullets are stamped with
 
 	// owned by the client that plays it
 	pos, old_pos:  Vec2,
@@ -153,6 +154,7 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 	if s.hit_spray > 0 do s.hit_spray -= 1
 
 	// Between rounds nobody moves.
+	s.cmd_seq = cmd.seq
 	s.controls = w.round.state == .Ended ? {} : cmd.buttons
 	if s.controls != {} do s.spawn_still = false
 	s.aim = cmd.aim
@@ -247,6 +249,26 @@ soldier_copy_served :: proc(dst, src: ^Soldier) {
 	dst.holding_flag = src.holding_flag
 	dst.kills, dst.deaths, dst.flags = src.kills, src.deaths, src.flags
 	dst.death_vel, dst.death_part = src.death_vel, src.death_part
+	dst.rng, dst.cmd_seq, dst.view_lag = src.rng, src.cmd_seq, src.view_lag
+	dst.primary_choice, dst.secondary_choice = src.primary_choice, src.secondary_choice
+}
+
+// The rest of a soldier: what only the machine playing it needs, so that the two halves
+// and this are the whole soldier and nothing of it is left to drift. In step with
+// net.ser_rest.
+soldier_copy_rest :: proc(dst, src: ^Soldier) {
+	dst.old_pos, dst.forces = src.old_pos, src.forces
+	dst.old_direction = src.old_direction
+	dst.was_running_left, dst.was_jumping = src.was_running_left, src.was_jumping
+	dst.on_ground_last = src.on_ground_last
+	dst.on_ground_permanent, dst.on_ground_for_law = src.on_ground_permanent, src.on_ground_for_law
+	dst.bg, dst.fired = src.bg, src.fired
+	dst.burst_count, dst.grenade_can_throw = src.burst_count, src.grenade_can_throw
+	dst.can_auto_reload_spas = src.can_auto_reload_spas
+	dst.auto_reload_when_can_fire = src.auto_reload_when_can_fire
+	dst.collider_distance, dst.hit_spray = src.collider_distance, src.hit_spray
+	dst.idle = src.idle
+	dst.legs.count, dst.body.count = src.legs.count, src.body.count
 }
 
 // An animation arrives as its id and frame; its pace is looked up here.

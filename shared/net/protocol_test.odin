@@ -12,7 +12,7 @@ update_round_trip :: proc(t: ^testing.T) {
 	defer free(sent)
 	defer free(back)
 
-	u := Update{tick = 1234, active = 0b101}
+	u := Update{tick = 1234, ack = 99, depth = 3, active = 0b101}
 	u.lags[0], u.lags[2] = 7, 9
 	u.round.time_left = 99
 	u.round.scores[.Bravo] = 3
@@ -43,6 +43,7 @@ update_round_trip :: proc(t: ^testing.T) {
 	got := back.(Update)
 	s := &got.entries[0].soldier
 	testing.expect(t, got.lags[0] == 7 && got.lags[2] == 9)
+	testing.expect(t, got.ack == 99 && got.depth == 3)
 	testing.expect(t, got.tick == 1234 && got.active == 0b101 && got.entry_count == 1 && got.fired_count == 1)
 	testing.expect(t, s.life == 3 && s.team == .Bravo && s.health == 61.5 && s.pos == {10.5, -3})
 	testing.expect(t, s.controls == {.Left, .Jet, .Fire} && s.direction == -1 && s.jets == 37)
@@ -70,33 +71,29 @@ facts_round_trip :: proc(t: ^testing.T) {
 	testing.expect(t, is_return && ret.player == 255)
 }
 
-// A client's packet is never trusted: one that is short, long, names a weapon that does
-// not exist or says it stands at not-a-number is refused whole.
+// A client's packet is never trusted: one that is short, long, or aims at
+// not-a-number is refused whole.
 @(test)
 bad_input_refused :: proc(t: ^testing.T) {
 	sent, back := new(Message), new(Message)
 	defer free(sent)
 	defer free(back)
-	in_ := Input{life = 1, view_tick = 50, has_state = true}
-	in_.soldier.pos = {5, 6}
-	in_.shots[0] = {id = 1, weapon = .MP5, pos = {5, 6}, vel = {20, 0}}
-	in_.shot_count = 1
+	in_ := Input{view_tick = 50, count = 2}
+	in_.cmds[0] = {seq = 7, buttons = {.Left, .Fire}, aim = {5, 6}}
+	in_.cmds[1] = {seq = 8, buttons = {.Jet}, aim = {7, 8}}
 	sent^ = in_
 	good: [MAX_PACKET]u8
 	size, _ := encode(good[:], sent)
 	testing.expect(t, decode(good[:size], back), "as written, it is taken")
+	got := back.(Input)
+	testing.expect(t, got.count == 2 && got.cmds[1].seq == 8 && got.cmds[0].buttons == {.Left, .Fire})
 
 	testing.expect(t, !decode(good[:size - 1], back), "short")
 	testing.expect(t, !decode(good[:size + 1], back), "long")
 
-	bad := good
-	weapon_at := size - 16 - 1 // the shot ends with its two vectors; its weapon is the byte before
-	testing.expect(t, bad[weapon_at] == u8(sim.Weapon_Id.MP5))
-	bad[weapon_at] = 200
-	testing.expect(t, !decode(bad[:size], back), "a weapon that does not exist")
-
-	in_.soldier.pos.x = math.nan_f32()
+	in_.cmds[0].aim.x = math.nan_f32()
 	sent^ = in_
+	bad: [MAX_PACKET]u8
 	size, _ = encode(bad[:], sent)
 	testing.expect(t, !decode(bad[:size], back), "not a number")
 }

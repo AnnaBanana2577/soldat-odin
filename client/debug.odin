@@ -97,6 +97,9 @@ debug_frame :: proc(d: ^Debug, dt: f64) {
 		me := &app.game.world.soldiers[app.game.me]
 		fmt.printfln("frame time over the second before: %.1f ms; tick %d, %d shots fired, %d hits given and %d taken as seen here, %d things, %d kills, %d deaths, health %.0f, at %.0f,%.0f", d.frame_time / f64(max(d.frames, 1)) * 1000, app.game.world.tick, app.game.shots_fired, app.game.hits_given, app.game.hits_taken, things, me.kills, me.deaths, me.health, me.pos.x, me.pos.y)
 		fmt.printfln("the others shown %d ticks behind the server, by its measure", app.game.my_lag)
+		g := &app.game
+		fmt.printfln("prediction: %.2f units off the server on average, %.2f at worst, over %d updates; %.0f commands waiting there",
+			g.error_count > 0 ? g.error_sum / f64(g.error_count) : 0, g.error_worst, g.error_count, g.depth)
 		host := app.conn.host
 		fmt.printfln("on the wire: %.1f KB/s up, %.1f KB/s down", f64(host.totalSentData) / 1024 / d.elapsed, f64(host.totalReceivedData) / 1024 / d.elapsed)
 		if d.screenshot != "" do rl.TakeScreenshot(strings.clone_to_cstring(d.screenshot, context.temp_allocator))

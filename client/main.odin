@@ -161,12 +161,13 @@ open_connection :: proc() {
 	connection.simulate_line(&app.conn, o.ping, o.jitter, o.loss)
 }
 
-// How many ticks this frame owes: its time goes in, a whole tick comes out per tick,
-// and the rest waits for the next frame. A stall never turns into a burst: at most
+// How many ticks this frame owes: its time goes in at the pace that holds my commands
+// waiting on the server (game.time_scale), a whole tick comes out per tick, and the
+// rest waits for the next frame. A stall never turns into a burst: at most
 // MAX_FRAME is owed.
 ticks_owed :: proc(dt: f64) -> int {
 	app.seconds += dt
-	app.accumulator = min(app.accumulator + dt, MAX_FRAME)
+	app.accumulator = min(app.accumulator + dt * app.game.time_scale, MAX_FRAME)
 	n := int(app.accumulator / TICK)
 	app.accumulator -= f64(n) * TICK
 	return n

@@ -2,13 +2,14 @@
 // says what the messages are and how they are laid out.
 //
 // Every machine runs the same simulation, so most of what happens is never sent. A
-// client says where its own soldier is and what it fired; the server says where
-// everyone is, which bullets were born, and what only it could decide.
+// client says which keys it held; the server runs every soldier and says where they
+// are, which bullets were born, and what only it could decide. A client predicts its
+// own soldier by replaying the commands the server has not run yet.
 //
-//   client -> server   Input    every tick: my soldier, the tick I show the others at,
-//                               my recent shots (each in a few packets running)
-//                      Act      what I did that the server must not miss: a gun or a
-//                               flag thrown, a suicide, the weapons or team I chose
+//   client -> server   Input    every tick: my recent commands (the unrun ones, so a
+//                               lost packet costs nothing) and the tick I show the
+//                               others at
+//                      Act      what I chose outside the keys: my weapons, my team
 //                      Chat     a line I said, to everyone or to my team
 //   server -> client   Map      the map to play, and where its flags stand: on joining,
 //                               and at the start of every round
@@ -19,8 +20,6 @@
 //                      Things   a thing, whole, when something happened to it
 //                      Facts    what the server decided: a death, a respawn, a pickup,
 //                               a score
-//                      Correction  where my soldier is, when the server refused where I
-//                               said it was
 //
 // A message is state or it is news. State (Input, Update) is sent over and over,
 // unreliably: a lost one is replaced by the next, and nothing in one is needed to read
@@ -33,22 +32,22 @@ package net
 
 import "../sim"
 
-VERSION      :: 10
+VERSION      :: 11
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
 CHANNEL_RELIABLE   :: 1 // news: losing one is a desync
 CHANNEL_COUNT      :: 2
 
-Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction }
+Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts }
 
 RELIABLE := [Msg_Kind]bool {
 	.Invalid = false, .Hello = true, .Welcome = true, .Denied = true, .Map = true, .Roster = true,
 	.Input = false, .Act = true, .Chat = true,
-	.Update = false, .Things = true, .Facts = true, .Correction = true,
+	.Update = false, .Things = true, .Facts = true,
 }
 
-MAX_SHOTS_PER_INPUT  :: 16
+MAX_CMDS_PER_INPUT   :: 12 // the unrun commands repeat in every packet: a fifth of a second
 MAX_SHOTS_PER_UPDATE :: 64
 MAX_THINGS_PER_MSG   :: 12
 MAX_FACTS_PER_MSG    :: 16
@@ -113,35 +112,23 @@ Roster :: struct {
 	bots:  u32, // a bit for each slot the server plays itself
 }
 
-// A bullet at birth, which is all of it that ever crosses the wire: every machine flies
-// it from here. `id` numbers the shooter's shots so one sent twice counts once.
-Shot :: struct {
-	id:       u32,
-	weapon:   sim.Weapon_Id,
-	pos, vel: sim.Vec2,
-	sends:    u8, // the shooter's own bookkeeping, not on the wire
-}
-
-// `life` is the life of my soldier this speaks of (sim.Soldier.life): the server takes
-// no word of a life it has ended. `view_tick` is the server tick I am showing the
-// others at: the server judges the shots in this packet against the soldiers of that
-// tick, and measures my lag by it.
+// My commands the server has not said it ran, oldest first, and the server tick I am
+// showing the others at: the server judges what I fire against the soldiers of that
+// tick, and measures my lag by it. Every packet carries them all again, so a lost one
+// costs nothing.
 Input :: struct {
-	life:       u8,
-	view_tick:  u32,
-	has_state:  bool,        // false while I have no living soldier
-	soldier:    sim.Soldier, // the half of it that is mine to say (ser_owned)
-	shots:      [MAX_SHOTS_PER_INPUT]Shot,
-	shot_count: int,
+	view_tick: u32,
+	cmds:      [MAX_CMDS_PER_INPUT]sim.Command,
+	count:     int,
 }
 
-Action :: enum u8 { Throw_Gun, Throw_Flag, Suicide, Loadout, Join_Team }
+// What a client chooses outside its keys: what its keys do is in its commands.
+Action :: enum u8 { Loadout, Join_Team }
 
 Act :: struct {
 	action: Action,
-	weapon: sim.Weapon_Id, // a thrown gun, as it left my hand; or the primary I chose
+	weapon: sim.Weapon_Id, // the primary I chose
 	second: sim.Weapon_Id, // the secondary I chose
-	ammo:   i32,
 	team:   sim.Team,      // the team I would join
 }
 
@@ -153,11 +140,13 @@ Chat :: struct {
 	text: Line,
 }
 
-// A soldier in an update: always the server's half, and its player's half unless it
-// is the receiver's own soldier or a corpse.
+// A soldier in an update: always the server's half, and its player's half unless it is
+// a corpse. The receiver's own carries the rest of it too (`has_rest`), because what it
+// replays its commands over must be the whole soldier and not a part of one.
 Entry :: struct {
 	slot:      u8,
 	has_owned: bool,
+	has_rest:  bool,
 	soldier:   sim.Soldier,
 }
 
@@ -178,8 +167,12 @@ Fired :: struct {
 // but not among the entries is out of the receiver's view, and heard of now and then.
 // `lags` has for every slot in play how late the server finds its player sees the world,
 // in ticks: the receiver's own tells it its lag, the rest are the scoreboard's pings.
+// `ack` is the receiver's last command the server has run, and `depth` how many of its
+// commands were waiting: what it replays from, and what it steers its clock by.
 Update :: struct {
 	tick:        u32,
+	ack:         u32,
+	depth:       u8,
 	round:       sim.Round, // state, time left, the two scores
 	active:      u32,
 	lags:        [sim.MAX_PLAYERS]u8,
@@ -202,14 +195,7 @@ Facts :: struct {
 	count:  int,
 }
 
-// The server refused where a client said its soldier was (further than a soldier can
-// move) and puts it back: a new life, as every placing is.
-Correction :: struct {
-	life:     u8,
-	pos, vel: sim.Vec2,
-}
-
-Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction }
+Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts }
 
 message_kind :: proc(m: ^Message) -> Msg_Kind {
 	switch _ in m {
@@ -224,7 +210,6 @@ message_kind :: proc(m: ^Message) -> Msg_Kind {
 	case Update:     return .Update
 	case Things:     return .Things
 	case Facts:      return .Facts
-	case Correction: return .Correction
 	}
 	return .Invalid
 }
@@ -282,13 +267,44 @@ ser_served :: proc(s: ^Stream, v: ^sim.Soldier) {
 	ser_as(s, &v.flags, u16)
 	ser_vec2(s, &v.death_vel)
 	ser_u8(s, &v.death_part)
+	ser_u64(s, &v.rng)
+	ser_u32(s, &v.cmd_seq)
+	ser_u8(s, &v.view_lag)
+	ser_enum(s, &v.primary_choice)
+	ser_enum(s, &v.secondary_choice)
 }
 
-ser_shot :: proc(s: ^Stream, v: ^Shot) {
-	ser_u32(s, &v.id)
-	ser_enum(s, &v.weapon)
-	ser_vec2(s, &v.pos)
-	ser_vec2(s, &v.vel)
+// The rest of a soldier: what only the machine playing it needs, and so what the server
+// sends back to that machine alone. In step with sim.soldier_copy_rest.
+ser_rest :: proc(s: ^Stream, v: ^sim.Soldier) {
+	ser_vec2(s, &v.old_pos)
+	ser_vec2(s, &v.forces)
+	ser_as(s, &v.old_direction, u8)
+	ser_bool(s, &v.was_running_left)
+	ser_bool(s, &v.was_jumping)
+	ser_bool(s, &v.on_ground_last)
+	ser_bool(s, &v.on_ground_permanent)
+	ser_bool(s, &v.on_ground_for_law)
+	ser_u8(s, &v.bg.status)
+	ser_as(s, &v.bg.poly, i16)
+	ser_bool(s, &v.bg.test_result)
+	ser_bool(s, &v.fired)
+	ser_as(s, &v.burst_count, i16)
+	ser_bool(s, &v.grenade_can_throw)
+	ser_bool(s, &v.can_auto_reload_spas)
+	ser_bool(s, &v.auto_reload_when_can_fire)
+	ser_u8(s, &v.collider_distance)
+	ser_u16(s, &v.hit_spray)
+	ser_as(s, &v.idle.time, i16)
+	ser_as(s, &v.idle.random, u8)
+	ser_as(s, &v.legs.count, u8)
+	ser_as(s, &v.body.count, u8)
+}
+
+ser_cmd :: proc(s: ^Stream, v: ^sim.Command) {
+	ser_u32(s, &v.seq)
+	ser_buttons(s, &v.buttons)
+	ser_vec2(s, &v.aim)
 }
 
 ser_fired :: proc(s: ^Stream, v: ^Fired) {
@@ -436,12 +452,9 @@ ser_roster :: proc(s: ^Stream, m: ^Roster) {
 }
 
 ser_input :: proc(s: ^Stream, m: ^Input) {
-	ser_u8(s, &m.life)
 	ser_u32(s, &m.view_tick)
-	ser_bool(s, &m.has_state)
-	if m.has_state do ser_owned(s, &m.soldier)
-	ser_count(s, &m.shot_count, MAX_SHOTS_PER_INPUT)
-	for i in 0 ..< m.shot_count do ser_shot(s, &m.shots[i])
+	ser_count(s, &m.count, MAX_CMDS_PER_INPUT)
+	for i in 0 ..< m.count do ser_cmd(s, &m.cmds[i])
 }
 
 ser_chat :: proc(s: ^Stream, m: ^Chat) {
@@ -454,12 +467,13 @@ ser_act :: proc(s: ^Stream, m: ^Act) {
 	ser_enum(s, &m.action)
 	ser_enum(s, &m.weapon)
 	ser_enum(s, &m.second)
-	ser_as(s, &m.ammo, i16)
 	ser_enum(s, &m.team)
 }
 
 ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_u32(s, &m.tick)
+	ser_u32(s, &m.ack)
+	ser_u8(s, &m.depth)
 	ser_enum(s, &m.round.state)
 	ser_as(s, &m.round.time_left, i32)
 	ser_as(s, &m.round.counter, i16)
@@ -473,8 +487,10 @@ ser_update :: proc(s: ^Stream, m: ^Update) {
 		ser_u8(s, &e.slot)
 		if !s.writing && int(e.slot) >= sim.MAX_PLAYERS do s.failed = true
 		ser_bool(s, &e.has_owned)
+		ser_bool(s, &e.has_rest)
 		ser_served(s, &e.soldier)
 		if e.has_owned do ser_owned(s, &e.soldier)
+		if e.has_rest do ser_rest(s, &e.soldier)
 	}
 	ser_count(s, &m.fired_count, MAX_SHOTS_PER_UPDATE)
 	for i in 0 ..< m.fired_count do ser_fired(s, &m.fired[i])
@@ -492,12 +508,6 @@ ser_things :: proc(s: ^Stream, m: ^Things) {
 ser_facts :: proc(s: ^Stream, m: ^Facts) {
 	ser_count(s, &m.count, MAX_FACTS_PER_MSG)
 	for i in 0 ..< m.count do ser_fact(s, &m.events[i])
-}
-
-ser_correction :: proc(s: ^Stream, m: ^Correction) {
-	ser_u8(s, &m.life)
-	ser_vec2(s, &m.pos)
-	ser_vec2(s, &m.vel)
 }
 
 // ---- encode and decode ----
@@ -529,7 +539,6 @@ decode :: proc(data: []u8, msg: ^Message) -> bool {
 	case .Update:     msg^ = Update{}
 	case .Things:     msg^ = Things{}
 	case .Facts:      msg^ = Facts{}
-	case .Correction: msg^ = Correction{}
 	}
 	ser_message(&s, msg)
 	return stream_finish(&s)
@@ -549,6 +558,5 @@ ser_message :: proc(s: ^Stream, msg: ^Message) {
 	case Update:     ser_update(s, &m)
 	case Things:     ser_things(s, &m)
 	case Facts:      ser_facts(s, &m)
-	case Correction: ser_correction(s, &m)
 	}
 }

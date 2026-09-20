@@ -2,9 +2,11 @@
 
 The shape of an Odin port on raylib and ENet, and its netcode, which is five rules:
 
-1. **My soldier is mine.** My client steps it on my keys and tells the server where it
-   is. It is never predicted and never corrected, so it never rubber-bands; the server
-   only refuses a move no soldier could make.
+1. **The server runs every soldier; my client predicts mine.** I send the keys I
+   pressed, numbered; the server runs them in order; I run the same step on the same
+   command the moment I make it, and replay the ones the server has not run over its
+   word (client/game/predict.odin). What I press shows at once and what counts is the
+   server's, so there is nothing to cheat with and nothing to wait for.
 2. **What matters to anyone else is the server's.** Whether a bullet hit, health,
    deaths, respawns, things, pickups, flags, scores. Every machine runs the same
    simulation and one flag on the world, authority, marks the one whose word counts.
@@ -15,8 +17,9 @@ The shape of an Odin port on raylib and ENet, and its netcode, which is five rul
    (it rewinds), so what you aim at is what you hit. The other clients fly that bullet
    forward by the shooter's lag plus their own, so the bullet you see coming is the
    one that will be ruled on, and you can dodge it.
-5. **State is sent over and over, unreliably; news is sent once, reliably.** Where a
-   soldier is goes in every packet and the next one replaces it. A death, a respawn,
+5. **State is sent over and over, unreliably; news is sent once, reliably.** My
+   commands and where the soldiers are go in every packet and the next one replaces
+   them. A death, a respawn,
    a pickup, a score, a thing that changed goes once and is never lost.
 
 How that comes to be built is under "What works", Online.
@@ -34,15 +37,17 @@ shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), debug, and a package
              per subsystem:
   connection/  the link to the server, the simulated bad line
-  game/        the world: game (the tick: receive / step / send), view (the others:
-               the view tick, the guessing on, the blending of corrections)
+  game/        the world: game (the tick: receive / step / send), predict (my own
+               soldier: the replay, the error blending out, the clock), view (the
+               others: the view tick, the guessing on, the blending of corrections)
   input/       input (the keys and mouse), script (the headless client's)
   render/      render (the world's picture, the map's meshes), camera, textures,
                gostek, bullet_art, things_art, sparks, sprite
   hud/         what is drawn over the world: hud (the bars and counts, the messages,
                the crosshair), kill_feed, weapons_menu, team_menu, scoreboard, chat
   audio/       audio
-server/      main (init / server_loop / cleanup), game (the tick), connection
+server/      main (init / server_loop / cleanup), game (the tick), queue (a client's
+             commands and which of them this tick runs), connection
 ```
 
 The client, client/main.odin:
@@ -160,14 +165,31 @@ Y to your team; Enter sends it, Esc lets it go.
   sent a jetting soldier's gun sailing away. Whoever stands by a free thing and may
   have it takes it, in the things' own update, where the world has authority.
 - Online. The five rules at the top, as built:
-  - A client steps its own soldier and sends it every tick (Input): the half of the
-    soldier that is its to say (where it is, its keys and aim, its animation, its
-    weapons), the server tick it is showing the others at, and its recent shots, each
-    riding in three packets so a lost one loses no shot. What the server must not miss
-    goes once, reliably (Act): a thrown gun, a thrown flag, a suicide, the weapons
-    chosen in the menu (for the next spawn; a soldier that has not moved since it
-    spawned its client arms at once, its weapons being its own to say). The server
-    tells everyone who plays in which slot, by name, whenever someone joins (Roster).
+  - A client sends the commands the server has not run, all of them in every packet so
+    a lost one costs nothing, with the server tick it is showing the others at (Input).
+    What it chooses outside its keys goes once, reliably (Act): its weapons, its team.
+    The server tells everyone who plays in which slot, by name, whenever someone joins
+    (Roster).
+  - The server runs each soldier on the commands its queue gives for that tick
+    (server/queue.odin), and three rules there are what make the prediction hold:
+    - **A starved queue steps nobody.** While a living soldier's commands are in
+      flight it is not stepped at all, so it ends up exactly where its client
+      predicted, however late they come. Stepping it with anything else (the last
+      command again, a neutral one) moves it here where the client did not, and every
+      such tick is a correction the client swallows when the commands land: that is
+      the pull-back a player feels under packet loss.
+    - **A burst runs in one tick.** Commands held up and landing together run down to
+      the depth the client's clock aims for, so a stall costs nothing lasting.
+    - **A quiet client's keys are let go** after half a second, so a soldier whose
+      player has gone away falls and stops instead of hanging in the air.
+  - The client runs its clock a shade faster or slower to keep about two commands
+    waiting on the server: enough to ride out jitter, not enough to be felt. Every
+    update carries the last command the server ran and how many were waiting.
+  - Prediction is only as good as what the server's word covers, so an update carries
+    the receiver's own soldier whole, every tick, and a test holds the wire's three
+    parts (served, owned, rest) to the whole soldier, so no field can quietly drift
+    (shared/net/soldier_halves_test.odin). Where the server disagrees the difference
+    is drawn as an offset that blends out in about a tenth of a second.
   - Rounds. A round ends at its score or time limit; the scores stand for five seconds
     and a third, counted down in the round, and the next round begins on the next map
     of the server's rotation (-map a,b,c), or the same one. The server loads it and
@@ -218,13 +240,15 @@ Y to your team; Enter sends it, Esc lets it go.
     out of range, counts too large and bytes left over (shared/net/protocol_test.odin).
   - ENet only sends what it was given when it is next pumped, a tick later; both ends
     flush at the end of their tick, which took two ticks off everyone's lag.
-  - Measured with the headless client against six dodging bots on Arena, 75 seconds a
-    run. On a clean line the hits it saw itself give and the hits the server ruled were
-    the same (25 of 25 and 13 of 13 in two runs), judged 17 ms back. On a simulated
-    120 ms line with 30 ms of jitter and 5% loss, 12 of the 14 it saw were ruled (13 of
-    15 in another run), judged 164 ms back. At 200 ms with 10% loss, 12 of 12 given
-    and 16 of 16 taken, judged 249 ms back. 4.8 KB/s up and 19.5 KB/s down with seven
-    soldiers in view.
+  - Measured with the headless client. Prediction: on a clean line the client's own
+    soldier sits 0.00 units from the server's on average (0.18 at worst) over 1800
+    updates; under 30% packet loss at 200 ms it is 0.03, and under 50% loss at 300 ms
+    0.06, which is the starved-queue rule doing its work. In a fight on a 120 ms line
+    with 5% loss it is 0.42, nearly all of it the knockback of a hit landing a tick or
+    two from where the server put it. Hits: on a clean line what the client saw itself
+    give and what the server ruled are the same; on the 120 ms line with 5% loss 22 of
+    the 26 it saw were ruled, and 19 of the 20 it saw itself take. 10 KB/s up (the
+    unrun commands repeat every tick) and 16 KB/s down with six soldiers in view.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg

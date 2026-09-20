@@ -51,8 +51,11 @@ Buttons :: bit_set[Button; u16]
 // Buttons that count once when pressed, however long they are held.
 ONE_SHOT :: Buttons{.Throw, .Change, .Prone, .Drop, .Suicide, .Flag_Throw, .Reload}
 
-// One tick of input for one soldier.
+// One tick of input for one soldier, numbered by the client that made it: the server
+// runs them in order and says which it has run, and the client replays the rest over
+// what the server sent (client/game/predict.odin).
 Command :: struct {
+	seq:     u32,
 	buttons: Buttons,
 	aim:     Vec2, // world-space cursor
 }

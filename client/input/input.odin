@@ -41,9 +41,10 @@ sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free, ke
 	in_.aim = aim
 }
 
-// The command for this tick.
-command :: proc(in_: ^Input) -> sim.Command {
-	return {buttons = in_.held + in_.pressed, aim = in_.aim}
+// The command for this tick, numbered: the server runs them in order and says which it
+// has run, and the client replays the rest (client/game/predict.odin).
+command :: proc(in_: ^Input, seq: u32) -> sim.Command {
+	return {seq = seq, buttons = in_.held + in_.pressed, aim = in_.aim}
 }
 
 clear :: proc(in_: ^Input) {

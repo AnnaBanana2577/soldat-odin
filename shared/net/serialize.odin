@@ -60,6 +60,13 @@ ser_u32 :: proc(s: ^Stream, v: ^u32) {
 	else do v^ = u32(b[0]) | u32(b[1]) << 8 | u32(b[2]) << 16 | u32(b[3]) << 24
 }
 
+ser_u64 :: proc(s: ^Stream, v: ^u64) {
+	low, high := u32(v^), u32(v^ >> 32)
+	ser_u32(s, &low)
+	ser_u32(s, &high)
+	if !s.writing do v^ = u64(low) | u64(high) << 32
+}
+
 ser_f32 :: proc(s: ^Stream, v: ^f32) {
 	bits := transmute(u32)v^
 	ser_u32(s, &bits)
