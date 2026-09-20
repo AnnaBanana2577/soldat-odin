@@ -85,8 +85,15 @@ cleanup :: proc() {
 	host_close(&server.host)
 }
 
+// Where the map and its art are read from: SOLDAT_BASE if it is set, and otherwise
+// the opensoldat assets beside this checkout. -base overrides both.
+default_base :: proc() -> string {
+	if set := os.get_env("SOLDAT_BASE", context.allocator); set != "" do return set
+	return "../opensoldat-base/shared"
+}
+
 parse_options :: proc() -> (o: Options) {
-	o.base = "../opensoldat-base/shared"
+	o.base = default_base()
 	o.maps = {"ctf_Ash"}
 	o.port = 23073
 	o.max_rewind_ms = 300

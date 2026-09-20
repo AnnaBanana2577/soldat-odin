@@ -42,7 +42,9 @@ Options :: struct {
 }
 
 main :: proc() {
-	opts := Options{base = "../opensoldat-base/shared", map_name = "ctf_Ash", port = 23073}
+	base := os.get_env("SOLDAT_BASE", context.allocator) // and otherwise beside this checkout
+	if base == "" do base = "../opensoldat-base/shared"
+	opts := Options{base = base, map_name = "ctf_Ash", port = 23073}
 	args := os.args[1:]
 	command := "check"
 	if len(args) > 0 && !strings.has_prefix(args[0], "-") {
