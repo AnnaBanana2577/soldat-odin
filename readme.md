@@ -97,11 +97,10 @@ odin run build.odin -file -- dev -bots 2    the same with two bots in it
 odin run build.odin -file -- server         build, then the server alone
 ```
 
-The server links no raylib. The map and its art come from the opensoldat/base
-assets, expected at ../opensoldat-base/shared, or wherever SOLDAT_BASE says (-base DIR
-overrides both, -map NAME
-for another map; the clients play the map the server names). Anything after a
-second -- goes to the program:
+The server links no raylib. The maps and the art are opensoldat's own, in assets/ here
+(SOLDAT_BASE, or -base DIR, plays another set of them; -map NAME picks another map, and
+the clients play the map the server names). Anything after a second -- goes to the
+program:
 
 ```
 odin run build.odin -file -- dev -- -window          in a window instead of borderless fullscreen
@@ -122,9 +121,6 @@ turn, a round each, a round ending after two minutes or three captures (the defa
 are fifteen and ten). trip and a half later, and those behind it wait). The bots are the server's own
 (-bots N; with -dodge they change direction and jet at random in a fight, as a person
 does). -port N picks another port on the server and the client alike.
-
-The assets are not in this checkout: set SOLDAT_BASE to the opensoldat base folder
-(`setx SOLDAT_BASE C:\dev\opensoldat-base\shared` once), or pass -base.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the

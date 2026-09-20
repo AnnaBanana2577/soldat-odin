@@ -43,7 +43,7 @@ Options :: struct {
 
 main :: proc() {
 	base := os.get_env("SOLDAT_BASE", context.allocator) // and otherwise beside this checkout
-	if base == "" do base = "../opensoldat-base/shared"
+	if base == "" do base = "assets"
 	opts := Options{base = base, map_name = "ctf_Ash", port = 23073}
 	args := os.args[1:]
 	command := "check"

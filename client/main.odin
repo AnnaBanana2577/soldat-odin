@@ -213,7 +213,7 @@ frame_seconds :: proc() -> f64 {
 // the opensoldat assets beside this checkout. -base overrides both.
 default_base :: proc() -> string {
 	if set := os.get_env("SOLDAT_BASE", context.allocator); set != "" do return set
-	return "../opensoldat-base/shared"
+	return "assets"
 }
 
 parse_options :: proc() -> (o: Options, d: Debug) {
