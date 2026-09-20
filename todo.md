@@ -1,7 +1,7 @@
 # To do
 
-What is left, on the `netcode` branch. The readme says how the netcode works (five
-rules, at the top) and what it measured; this says what it does not do yet.
+What is left. The readme says how the netcode works (five rules, at the top) and what it
+measured; this says what it does not do yet.
 
 ## Netcode
 
@@ -80,17 +80,14 @@ rules, at the top) and what it measured; this says what it does not do yet.
   shots show locally and are refused. It also counts hits on itself in that time
   that the server never rules.
 
-## The other branches
+## The branches
 
-`csp` is the line of work: the server runs every soldier and the client predicts its
-own. The rest are kept for reference.
-
+- `main`: the line of work. The server runs every soldier and the client predicts its
+  own (client-side prediction, interpolation, lag compensation).
 - `netcode`: the same game with Soldat's model instead, a client owning its own
-  movement. Worth keeping to compare the feel of the two on one line.
-- `server-auth`: the first try at this model, and the one that felt wrong. Its server
-  stepped a player whose commands had not arrived by repeating the last one, which is
-  a correction on every starved tick (server/queue.odin has the rule that replaces it).
-- `soldat-net`: the first draft of `netcode`, with a shadow world and a fast-forward
-  that never moved the bullet.
-- `opensoldat-net`: OpenSoldat's netcode, message for message.
-- `main`: the client-authority baseline this all started from.
+  movement and the server refereeing. Kept to compare the feel of the two on one line.
+
+The tries before those are gone: a server that stepped a player whose commands had not
+arrived (which is what made this model feel wrong the first time), a draft with a shadow
+world and a fast-forward that never moved the bullet, and OpenSoldat's netcode copied
+message for message. GitHub still holds them, and every branch there is stale.
