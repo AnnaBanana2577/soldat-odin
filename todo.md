@@ -83,14 +83,15 @@ rules, at the top) and what it measured; this says what it does not do yet.
 
 ## The other branches
 
-Kept for reference; this branch replaces them.
+`csp` is the line of work: the server runs every soldier and the client predicts its
+own. The rest are kept for reference.
 
-- `main`: the server runs everything; clients send commands, predict by replaying
-  them on the newest snapshot, and show the rest interpolated. Every lag in that chain
-  (the command queue, the interpolation buffer) adds to how far behind a victim sees
-  the bullet that hits it, and snapshot bullets cannot be flown forward to make up
-  for it.
-- `soldat-net`: this model's first draft. It kept a shadow world to send soldiers only
-  when the clients' guess had drifted, and its fast-forward never moved the bullet.
+- `netcode`: the same game with Soldat's model instead, a client owning its own
+  movement. Worth keeping to compare the feel of the two on one line.
+- `server-auth`: the first try at this model, and the one that felt wrong. Its server
+  stepped a player whose commands had not arrived by repeating the last one, which is
+  a correction on every starved tick (server/queue.odin has the rule that replaces it).
+- `soldat-net`: the first draft of `netcode`, with a shadow world and a fast-forward
+  that never moved the bullet.
 - `opensoldat-net`: OpenSoldat's netcode, message for message.
-- `server-auth`: the first version of `main`.
+- `main`: the client-authority baseline this all started from.
