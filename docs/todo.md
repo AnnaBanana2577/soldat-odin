@@ -1,6 +1,6 @@
 # To do
 
-What is left. The readme says how the netcode works (five rules, at the top) and what it
+What is left. The readme says how the netcode works (the model, at the top) and what it
 measured; this says what it does not do yet. Checked against the code on 2026-09-21.
 
 ## Netcode
@@ -132,14 +132,14 @@ what is in; this is the rest of it.
 - A test window takes the keyboard's focus when it opens, so keys typed elsewhere while
   it runs reach the game (a scripted run once picked a weapon from the menu this way).
 
-## The branches
+## What was tried and dropped
 
-- `main`: the line of work. The server runs every soldier and the client predicts its
-  own (client-side prediction, interpolation, lag compensation).
-- `netcode`: the same game with Soldat's model instead, a client owning its own
-  movement and the server refereeing. Kept to compare the feel of the two on one line.
+None of these is kept. They are written down so that the next person to think of one
+knows it has been thought of.
 
-The tries before those are gone: a server that stepped a player whose commands had not
-arrived (which is what made this model feel wrong the first time), a draft with a shadow
-world and a fast-forward that never moved the bullet, and OpenSoldat's netcode copied
-message for message. GitHub still holds them, and every branch there is stale.
+- A server that stepped a player whose commands had not arrived, which is what made
+  this model feel wrong the first time.
+- A draft with a shadow world, and a fast-forward that never moved the bullet.
+- OpenSoldat's netcode copied message for message.
+- Soldat's own model: a client owning its own movement and the server refereeing. It
+  was carried far enough to feel both on one line, and then dropped.

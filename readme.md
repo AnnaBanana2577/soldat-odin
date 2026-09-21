@@ -1,94 +1,52 @@
-# soldat-odin skeleton
+# soldat-odin
 
-The shape of an Odin port on raylib and ENet, and its netcode, which is five rules:
+An Odin port of Soldat on raylib and ENet: a server-authoritative game, and the tooling
+to make things for it in the same binary. A map editor is here; a .po and .poa editor
+and a mod maker are to come.
 
-1. **The server runs every soldier; my client predicts mine.** I send the keys I
-   pressed, numbered; the server runs them in order; I run the same step on the same
-   command the moment I make it, and replay the ones the server has not run over its
-   word (client/game/predict.odin). What I press shows at once and what counts is the
-   server's, so there is nothing to cheat with and nothing to wait for.
-2. **What matters to anyone else is the server's.** Whether a bullet hit, health,
-   deaths, respawns, things, pickups, flags, scores. Every machine runs the same
-   simulation and one flag on the world, authority, marks the one whose word counts.
-3. **A bullet crosses the wire once, at birth,** and flies on every machine from
-   there, so the blood, the sparks and the sounds are local and at once.
-4. **Everyone sees the others a little in the past, drawn between two of the server's
-   words rather than guessed, and the bullets are moved to match.** The server judges a
-   bullet against the soldiers as its shooter saw them (it rewinds to the tick that
-   client says it is showing), so what you aim at is what you hit. The other clients fly
-   that bullet forward by the shooter's lag plus their own, so the bullet you see coming
-   is the one that will be ruled on, and you can dodge it.
-5. **State is sent over and over, unreliably; news is sent once, reliably.** My
-   commands and where the soldiers are go in every packet and the next one replaces
-   them. A death, a respawn,
-   a pickup, a score, a thing that changed goes once and is never lost.
+The netcode is the Quake 3 model on a fixed timestep.
 
-How that comes to be built is under "What works", Online.
+- **Server-authoritative snapshots.** The server runs the one true world and decides
+  everything that matters to anyone else: whether a bullet hit, health, deaths,
+  respawns, pickups, flags, scores. What it sends each client is a delta against the
+  newest snapshot that client has acknowledged: the entities that changed, and of those
+  the 4-byte words that changed, under a mask. The receiver's own soldier is in
+  every one; the others come every sv_update_others ticks.
+- **Client-side prediction.** A client sends numbered commands and nothing else. Each
+  tick it rebuilds its world from the newest snapshot and replays the commands the
+  server has not run yet (client/game/predict.odin), so its own soldier answers the
+  keys at once; where the server disagrees, the difference is drawn as an offset that
+  blends out over about a tenth of a second.
+- **Interpolation delay.** The others are drawn between the two snapshots either side
+  of a render tick a few ticks behind the newest (net_interp, three by default), never
+  guessed forward, so nothing about them is ever taken back.
 
-```
-shared/sim/  the simulation, shared, one file per object: level (the map: loading,
-             sectors, collision queries), soldier (movement, soldier_anim, combat,
-             antics, soldier_collision), bullet (bullet_collision, explosion), damage
-             (the one place health changes), thing (flag, kit, dropped_gun, parachute,
-             stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
-             union), bot (the brain of the server's bots and of the test client), math
-shared/cvar/ the settings: a name, a value, a default and a line of help, set from
-             config.cfg and the command line
-shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
-             Welcome, Map, Roster, Input, Act, Chat, Update, Things, Facts), Fake_Link
-shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
-client/      main (each subsystem opened, the loop, each closed), settings (every cl_,
-             net_, snd_, r_ and dbg_ setting), debug, and a package
-             per subsystem:
-  connection/  the link to the server, the simulated bad line
-  game/        the world: game (the tick: receive / step / send), predict (my own
-               soldier: the replay, the error blending out, the clock), view (the
-               others: the words kept of each, the tick they are shown at, the drawing
-               between two of them)
-  input/       input (the keys and mouse), script (the headless client's)
-  render/      render (the world's picture, the map's meshes), camera, textures,
-               gostek, bullet_art, things_art, sparks, sprite
-  hud/         what is drawn over the world: hud (the bars and counts, the messages,
-               the crosshair), kill_feed, weapons_menu, team_menu, scoreboard, chat
-  audio/       audio
-server/      main (init / server_loop / cleanup), settings (every sv_ setting), game
-             (the tick), queue (a client's commands and which of them this tick runs),
-             connection
-```
+The fixed timestep is the departure. Quake 3 moves its world by whatever slice of time
+a frame happened to take; here it moves only in whole ticks of the same length on every
+machine, and a command is the keys held for exactly one of them. That is what lets a
+client's replay land on the server's answer rather than near it.
 
-The client, client/main.odin:
+Two more come from Soldat rather than from Quake. A bullet crosses the wire once, at
+birth, and flies on every machine from there, so the blood, the sparks and the sounds
+are local and at once. And the server rewinds: a shot is judged against the soldiers as
+its shooter saw them, each command naming the tick its client was showing, as far back
+as sv_maxrewind allows and no further.
 
-```
-open window, connection, game, render, hud, audio
-until the window closes:
-  sample input                  the weapons menu first, then the keys and the cursor
-  for each tick owed:
-    game.tick                   (client/game/game.odin)
-      view_advance                everyone else one tick on, as guessed
-      receive                     the server's word over the guesses; the others' bullets
-      step_mine                   my soldier on this tick's keys
-      step_world                  the corpses, the things, every bullet
-      send                        my soldier, the tick I show the others at, my shots
-    render.tick, hud.tick, audio.tick    the sparks, the kill feed, the sounds of it
-  render.camera_follow, render.draw, hud.draw
-close audio, hud, render, game, connection, window
-```
-
-A headless client (cl_headless) runs the same without the window, the picture and the
-sound (run_headless), played by the bots' brain: a player for testing the netcode.
-
-The server's tick, server/game.odin, reads the same way:
-
-```
-for each tick owed:
-  step_soldiers   every soldier one tick on: the bots played, the players guessed
-  receive         the clients' word over the guesses; their shots, checked
-  step_world      the things, every bullet, the round; the hits become wounds
-  send            what changed, what was decided, the soldiers and the bullets born
-sleep until the next tick
-```
+Each piece of that, as it is actually built, is in [docs/netcode.md](docs/netcode.md);
+the packages, and how the client and the server each spend a tick, are in
+[docs/architecture.md](docs/architecture.md).
 
 ## Building and running
+
+Odin is most of what you need: raylib comes vendored with the compiler for every
+platform it runs on, and so does ENet on Windows. Elsewhere ENet is the system's.
+
+- **Windows.** [Odin](https://odin-lang.org/docs/install/), and nothing else.
+- **Linux.** Odin, ENet (`libenet-dev` on Debian and Ubuntu, `enet-devel` on Fedora,
+  `enet` on Arch) and the X11 headers (`libx11-dev`), which the vendored raylib links
+  against along with dl and pthread.
+- **macOS.** Odin, the Xcode command line tools (`xcode-select --install`) for the
+  Cocoa, OpenGL and IOKit frameworks raylib links, and ENet (`brew install enet`).
 
 One entry point, build.odin, in Odin so it works the same everywhere:
 
@@ -105,9 +63,12 @@ The server links no raylib. The maps and the art are opensoldat's own, in assets
 
 Every setting is a cvar (shared/cvar): config.cfg is read at startup and the command
 line has the last word, and `client -cvars` or `server -cvars` prints them all with what
-they are set to. One config.cfg serves both, each taking what is its own. The build
-script keeps -release and -no-build for itself and passes every other -name value to the
-server, so its settings work here; anything after a second -- goes to the client:
+they are set to. One config.cfg serves both, each taking what is its own; it is read
+from cl_base or sv_base, which is the working directory unless it is named, so a
+distribution that unpacks assets/ beside the executable finds it. The dev and server
+commands here pass the checkout's assets/ for you. The build script keeps -release and
+-no-build for itself and passes every other -name value to the server, so its settings
+work here; anything after a second -- goes to the client:
 
 ```
 odin run build.odin -file -- dev -- -cl_window           in a window, not borderless fullscreen
@@ -128,7 +89,7 @@ reliable packet is resent a round trip and a half later, and those behind it wai
 last plays ctf_Ash and Arena in turn, a round each, a round ending at two minutes or
 three captures (the defaults are fifteen and ten); sv_bots_difficulty sets how well the
 bots aim (300 stupid, 100 normal, 10 impossible) and sv_bots_chat whether they talk, and
-sv_base or SOLDAT_BASE plays another set of maps and art.
+sv_base plays another set of maps and art.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
@@ -137,6 +98,23 @@ scoreboard and F3 the minimap. Tab opens and closes the weapons menu; in it a cl
 everyone and Y to your team; Enter sends it, Esc lets it go. Esc opens the game's menu:
 1 leaves, 2 and 3 open the windows for voting in a map or voting a player out, 4 picks
 a team. While a vote is running, F12 agrees with it and F11 has none of it.
+
+## Tooling
+
+The editors live in the game's own binary and draw with the game's own renderer, so
+what you see while making a thing is what the game will show.
+
+- **The map editor** is here now: `client -cl_editor [-cl_map NAME]`, in client/editor/.
+  It owns the .pms file as it really is, every field down to the padding bytes
+  (shared/pms), and everything on screen is derived from it one way: the map is written
+  to bytes, the game's loader reads those bytes, and the renderer draws what comes out.
+  A field the editor would lose shows up as a change on screen rather than quietly on
+  disk. The game's loader is the right one to draw with and the wrong one to save from,
+  which is why it sits downstream of the codec and never the other way round.
+- **A .po and .poa editor**, for the gostek's objects and the animations that move
+  them, is planned: the same round trip through a codec the game reads.
+- **A mod maker**, for putting art, sounds and weapon settings together as a mod, is
+  planned.
 
 ## What works
 
@@ -176,93 +154,8 @@ a team. While a vote is running, F12 agrees with it and F11 has none of it.
   soldier fell rather than carrying the body's speed as the original has it, which
   sent a jetting soldier's gun sailing away. Whoever stands by a free thing and may
   have it takes it, in the things' own update, where the world has authority.
-- Online. The five rules at the top, as built:
-  - A client sends the commands the server has not run, all of them in every packet so
-    a lost one costs nothing, with the server tick it is showing the others at (Input).
-    What it chooses outside its keys goes once, reliably (Act): its weapons, its team.
-    The server tells everyone who plays in which slot, by name, whenever someone joins
-    (Roster).
-  - The server runs each soldier on the commands its queue gives for that tick
-    (server/queue.odin), and three rules there are what make the prediction hold:
-    - **A starved queue steps nobody.** While a living soldier's commands are in
-      flight it is not stepped at all, so it ends up exactly where its client
-      predicted, however late they come. Stepping it with anything else (the last
-      command again, a neutral one) moves it here where the client did not, and every
-      such tick is a correction the client swallows when the commands land: that is
-      the pull-back a player feels under packet loss.
-    - **A burst runs in one tick.** Commands held up and landing together run down to
-      the depth the client's clock aims for, so a stall costs nothing lasting.
-    - **A quiet client's keys are let go** after half a second, so a soldier whose
-      player has gone away falls and stops instead of hanging in the air.
-  - The client runs its clock a shade faster or slower to keep about two commands
-    waiting on the server: enough to ride out jitter, not enough to be felt. Every
-    update carries the last command the server ran and how many were waiting.
-  - My own bullets stay on my own timeline: I fired them from the same command the
-    server did, so they are usually where its are anyway. When the server says where one
-    ended, mine ends there too, which is where it was ruled to hit or miss.
-  - Prediction is only as good as what the server's word covers, so an update carries
-    the receiver's own soldier whole, every tick, and a test holds the wire's three
-    parts (served, owned, rest) to the whole soldier, so no field can quietly drift
-    (shared/net/soldier_halves_test.odin). Where the server disagrees the difference
-    is drawn as an offset that blends out in about a tenth of a second.
-  - Rounds. A round ends at its score or time limit; the scores stand for five seconds
-    and a third, counted down in the round, and the next round begins on the next map
-    of the server's rotation (-map a,b,c), or the same one. The server loads it and
-    tells everyone which it is and where its flags stand (Map), then, in that order on
-    the same channel, the things and everyone's placing with a nil tally. Joining is
-    hearing of the first Map, so a newcomer and a round's start are one path: a client
-    has no map until the server names one, the picture is rebuilt whenever the game
-    loads another, and an update from before the Map is of the last round and dropped.
-    Every placing of a soldier (a spawn, a respawn, a new round) is told as a fact and
-    every client places that soldier on it, so nobody lingers where they were.
-  - The server steps every soldier every tick: its bots on their brain's command, and
-    the players on the commands their queues give for that tick. Because its world has
-    authority, what those steps cause counts: a wound from lava, a fall off the map, a
-    bullet fired. Nothing a client sends is taken on trust, because nothing but the keys
-    is sent: the server runs the sim itself.
-  - Every other tick each client gets an Update: which slots are in play, the soldiers
-    in its view (its own with only the server's half: health, death, the flag, the
-    tally), the ones out of view twice a second, and the bullets born lately whose line
-    of flight passes near it, each in three updates running and numbered so it flies
-    once. A thing goes out whole when it appears or goes, changes hands, or starts or
-    stops moving (Things); in between every machine runs the same physics on it. What
-    only the server could decide goes out as a fact (Facts), and sounds and shows like
-    anything else that happened; what a pickup gives of the things a client owns (a
-    gun, grenades) the client gives itself on hearing of it.
-  - Time. A client shows the others at a view tick a few ticks behind the newest word
-    of them, drawn between the two words around it, so nothing about them is guessed and
-    nothing taken back; how far behind follows the line, three ticks on a good one
-    (client/game/view.odin). Every Input names that tick, and the
-    difference from the tick it arrives in is the client's lag, measured per packet. A
-    bullet keeps the lag of the packet it came in and meets the soldiers as they were
-    that long ago (sim/history.odin), for as long as it flies, up to a cap (sv_maxrewind,
-    300 ms by default; past it a shooter leads). The others fly that bullet on by the
-    ticks since its birth, its shooter's lag and their own: the server will rule it
-    against me as I was my own lag ago, so the bullet that will be ruled to hit me is
-    that far ahead of the one the server spawned. Soldat's rule: my ping plus the
-    shooter's. The shove of a hit on me comes with the server's word on my soldier,
-    as the wound does: shoving myself where I see the bullet land would be a guess at a
-    tick the server has not reached.
-  - Lives. The server places a soldier (a spawn, a respawn, a correction) and each
-    placing begins a new life, numbered. A client says which life its word is of and
-    takes the server's word of its own soldier only for the life it is living, so word
-    from before a placing is never taken for word from after it, whichever way the
-    packets cross.
-  - Every message is state or news, and RELIABLE in shared/net/protocol.odin says
-    which; no call site chooses. Each has one serialize procedure, used for reading
-    and writing both, bounds-checked, that refuses floats that are not numbers, enums
-    out of range, counts too large and bytes left over (shared/net/protocol_test.odin).
-  - ENet only sends what it was given when it is next pumped, a tick later; both ends
-    flush at the end of their tick, which took two ticks off everyone's lag.
-  - Measured with the headless client against five dodging bots on Arena, ninety
-    seconds a run. Prediction: in a fight on a clean line the client's own soldier sits
-    0.00 units from the server's on average (0.34 at worst) over 5000 updates, and 0.10
-    on a 120 ms line with 5% loss. Under 30% packet loss at 200 ms it is 0.03, and under
-    50% loss at 300 ms 0.06: the starved-queue rule doing its work. Hits: on the clean
-    line 21 of the 21 it saw itself give were ruled, and 10 of the 11 it took; on the
-    120 ms line 14 of 15 given and 22 of 24 taken. The others sit three ticks behind the
-    newest word of them. 3 KB/s up on a clean line (8 when the unrun commands pile up)
-    and 30 KB/s down with six soldiers in view.
+- Online. The model at the top, built out piece by piece in
+  [docs/netcode.md](docs/netcode.md).
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg
@@ -334,3 +227,17 @@ a team. While a vote is running, F12 agrees with it and F11 has none of it.
 - The weapons menu (the original's limbo menu): it opens when I die and when I join,
   and goes away when my soldier first moves; Tab opens it by hand. Names come from
   the server's roster; the bots have names.
+
+## Licence
+
+The code is MIT, the same licence OpenSoldat uses and much of this is a port of.
+[license.md](license.md) keeps Transhuman Design's copyright beside this port's, as the
+MIT terms require of a derivative.
+
+The contents of `assets/` are under different terms. The art, maps, animations,
+sounds and bot personalities come from
+[opensoldat/base](https://github.com/opensoldat/base) under **CC BY 4.0**, and
+`assets/play-regular.ttf` is under the **SIL Open Font License 1.1**. Both licence
+texts and the attribution they ask for are in
+[assets/NOTICE.md](assets/NOTICE.md), [assets/LICENSE.txt](assets/LICENSE.txt)
+and [assets/OFL.txt](assets/OFL.txt).
