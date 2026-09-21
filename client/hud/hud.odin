@@ -306,8 +306,31 @@ draw_status :: proc(h: ^Hud, g: ^game.Game, sc: Screen, mine: ^sim.Soldier) {
 			best_other = max(best_other, o.kills)
 		}
 		text(h, sc, .Small, fmt.tprintf("%d/%d", place, players), x, 421, {88, 255, 90, 255})
-		lead := players > 1 ? fmt.tprintf("%d (%+d)", mine.kills, mine.kills - best_other) : fmt.tprint(mine.kills)
+
+		// Leading, the gap back to the second; otherwise the gap up to the leader, which
+		// is negative and carries its own sign. The original signs only a gain.
+		lead := fmt.tprint(mine.kills)
+		if players > 1 {
+			gap := mine.kills - best_other
+			lead = fmt.tprintf("%d (%s%d)", mine.kills, gap > 0 ? "+" : "", gap)
+		}
 		text(h, sc, .Small, lead, x, 431, {255, 55, 50, 255})
+
+		// What it takes to win, under the two of them.
+		text(h, sc, .Small, fmt.tprint(w.round.score_limit), x, 441, {114, 120, 255, 255})
+	}
+
+	// The bonus in hand and how long is left of it, by the middle of the bars.
+	bonus_name := ""
+	switch mine.bonus {
+	case .None:
+	case .Flame_God: bonus_name = "Flame God"
+	case .Predator:  bonus_name = "Predator"
+	case .Berserker: bonus_name = "Berserker"
+	}
+	if bonus_name != "" {
+		left := f32(max(mine.bonus_time, 0)) / sim.TICK_RATE
+		text(h, sc, .Menu, fmt.tprintf("%s - %.1f", bonus_name, left), spread(sc, 190), 435, {245, 40, 50, 255})
 	}
 }
 
