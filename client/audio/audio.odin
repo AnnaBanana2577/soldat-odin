@@ -64,11 +64,11 @@ Reserved :: struct {
 	paused: bool,
 }
 
-init :: proc(a: ^Audio, base: string) {
+init :: proc(a: ^Audio, base: string, volume: f32) {
 	rl.InitAudioDevice()
 	a.ready = rl.IsAudioDeviceReady()
 	a.dir, _ = filepath.join({base, "sfx"})
-	a.volume = DEFAULT_VOLUME
+	a.volume = volume
 	a.rng = 0x9E3779B1
 }
 

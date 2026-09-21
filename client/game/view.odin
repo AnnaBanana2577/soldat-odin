@@ -22,6 +22,7 @@ View :: struct {
 	newest:  u32, // the newest tick heard of
 	tick:    u32, // the tick the others are shown at
 	behind:  int, // how far behind the newest that is, in ticks
+	least_behind: int, // and never nearer than this (net_interp)
 	least:   int, // the fewest ticks of word ahead of the shown tick this second
 	window:  int, // ticks into that second
 	prev:    [sim.MAX_PLAYERS]sim.Vec2, // where each was shown a tick ago, for drawing between ticks
@@ -34,14 +35,13 @@ Sample :: struct {
 }
 
 SAMPLES        :: 24  // words kept for each soldier: a second of them at 30 a second
-BEHIND_LEAST   :: 3   // never nearer the newest word than this
 BEHIND_MOST    :: 20
 GAP_SNAP       :: 15  // ticks between two words beyond which the soldier is shown at the newer
 GUESS_MOST     :: 6   // ticks a missing newer word is guessed forward at most: a tenth of a second
 WINDOW         :: sim.TICK_RATE // how often how far behind to sit is reconsidered
 
-view_init :: proc(v: ^View) {
-	v^ = {behind = 2 * OTHERS_EVERY, least = max(int)}
+view_init :: proc(v: ^View, least_behind: int) {
+	v^ = {behind = max(2 * OTHERS_EVERY, least_behind), least_behind = least_behind, least = max(int)}
 }
 
 OTHERS_EVERY :: 2 // ticks between the server's words of the others (server/game.odin)
@@ -115,7 +115,7 @@ view_clock :: proc(v: ^View) {
 	// a second with a moment of nothing ahead sits further back; a second with plenty
 	// to spare the whole way sits nearer
 	if v.least < 1 do v.behind = min(v.behind + 2, BEHIND_MOST)
-	else if v.least > OTHERS_EVERY do v.behind = max(v.behind - 1, BEHIND_LEAST)
+	else if v.least > OTHERS_EVERY do v.behind = max(v.behind - 1, v.least_behind)
 	if ahead < v.behind - 2 do v.tick -= 1 // and wait a tick for the news to catch up
 	v.least, v.window = max(int), 0
 }

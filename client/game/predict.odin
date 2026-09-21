@@ -16,7 +16,6 @@ import "../../shared/sim"
 // dropped and made again by the replay, so a bullet is never made twice and never
 // missed. The server does not send me my own.
 
-CLOCK_TARGET :: 2.0   // commands I want waiting on the server (queue.odin's CATCH_UP_KEEP)
 CLOCK_GAIN   :: 0.015 // of a command's worth of depth, per tick of my clock
 CLOCK_MOST   :: 0.04  // and never faster or slower than this
 DEPTH_EASE   :: 0.1   // how quickly the depth I steer by follows what the server reports
@@ -67,13 +66,13 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 }
 
 // Once per tick: the offset blending out, and my clock held so the server has about
-// CLOCK_TARGET of my commands waiting. Too few and it starves (a tick where my soldier
+// g.clock_target of my commands waiting (net_clock_target; queue.odin's CATCH_UP_KEEP). Too few and it starves (a tick where my soldier
 // does not move there); too many and everything I press waits.
 predict_tick :: proc(g: ^Game) {
 	g.error *= ERROR_KEPT
 	if sim.vec2_length(g.error) < 0.05 do g.error = {}
 
 	g.depth += (f64(g.server_depth) - g.depth) * DEPTH_EASE
-	adjust := (CLOCK_TARGET - g.depth) * CLOCK_GAIN
+	adjust := (g.clock_target - g.depth) * CLOCK_GAIN
 	g.time_scale = 1 + clamp(adjust, -CLOCK_MOST, CLOCK_MOST)
 }

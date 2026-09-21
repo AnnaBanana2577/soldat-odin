@@ -1,25 +1,22 @@
 package client
 
 import "core:fmt"
-import "core:strconv"
 import "core:strings"
 import rl "vendor:raylib"
-import "game"
 import "render"
 import "../shared/sim"
 
-// Everything that exists for checking the game rather than playing it, in one place
-// so it never leaks into game code:
+// Everything that exists for checking the game rather than playing it, in one place so
+// it never leaks into game code. What it is told comes from the settings under r_ and
+// dbg_ (settings.odin):
 //
-//   -wire             the polygons as lines over the art
-//   -zoom F           the view scale, 1 the original, smaller closer
-//   -hold a,b,c       buttons held the whole run (left right jump crouch jet fire throw drop reload change prone suicide)
-//   -aim X,Y          the cursor held at this offset from our soldier
-//   -seconds N        quits after N seconds with a line of counts
-//   -screenshot FILE  writes the frame then too; alone it implies -seconds 2
+//   r_wire             the polygons as lines over the art
+//   r_zoom F           the view scale, 1 the original, smaller closer
+//   dbg_hold a,b,c     buttons held the whole run (left right jump crouch jet fire...)
+//   dbg_aim X,Y        the cursor held at this offset from our soldier
+//   dbg_seconds N      quits after N seconds with a line of counts
+//   dbg_screenshot F   writes the frame then too; alone it implies dbg_seconds 2
 Debug :: struct {
-	wireframe:  bool,
-	zoom:       f32,
 	hold:       sim.Buttons,
 	aim:        sim.Vec2,
 	has_aim:    bool,
@@ -31,52 +28,12 @@ Debug :: struct {
 	done:       bool,
 }
 
-// Consumes a debug option; returns whether it took `value` as well.
-debug_option :: proc(d: ^Debug, name, value: string) -> (took_value: bool) {
-	switch name {
-	case "-wire":
-		d.wireframe = true
-	case "-zoom":
-		d.zoom, _ = strconv.parse_f32(value)
-		return true
-	case "-hold":
-		for button in strings.split(value, ",", context.temp_allocator) {
-			switch button {
-			case "left":   d.hold += {.Left}
-			case "right":  d.hold += {.Right}
-			case "jump":   d.hold += {.Jump}
-			case "crouch": d.hold += {.Crouch}
-			case "jet":    d.hold += {.Jet}
-			case "fire":   d.hold += {.Fire}
-			case "throw":  d.hold += {.Throw}
-			case "drop":   d.hold += {.Drop}
-			case "reload": d.hold += {.Reload}
-			case "change": d.hold += {.Change}
-			case "prone":  d.hold += {.Prone}
-			case "suicide": d.hold += {.Suicide}
-			}
-		}
-		return true
-	case "-aim":
-		parts := strings.split(value, ",", context.temp_allocator)
-		if len(parts) == 2 {
-			d.aim.x, _ = strconv.parse_f32(parts[0])
-			d.aim.y, _ = strconv.parse_f32(parts[1])
-			d.has_aim = true
-		}
-		return true
-	case "-screenshot":
-		d.screenshot = value
-		return true
-	case "-seconds":
-		d.seconds, _ = strconv.parse_f64(value)
-		return true
-	}
-	return false
-}
-
-debug_init :: proc(d: ^Debug, g: ^game.Game, camera: ^render.Camera) {
-	if d.zoom > 0 do camera.zoom = d.zoom
+// What the settings say of it, once they have been read.
+debug_init :: proc(d: ^Debug, s: ^Settings, camera: ^render.Camera) {
+	d.hold = settings_hold(s)
+	d.aim, d.has_aim = settings_aim(s)
+	d.screenshot, d.seconds = s.screenshot, f64(s.seconds)
+	if s.zoom > 0 do camera.zoom = s.zoom
 	if d.screenshot != "" do d.has_aim = true // a capture never follows the real mouse
 	if d.screenshot != "" && d.seconds == 0 do d.seconds = 2
 }

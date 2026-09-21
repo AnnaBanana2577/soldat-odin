@@ -4,14 +4,14 @@
 //   odin run build.odin -file -- check          type-check every package
 //   odin run build.odin -file -- build          compile the client and the server
 //   odin run build.odin -file -- test           run the package tests
-//   odin run build.odin -file -- dev            build, then a server with a client joined (-bots N: the server's bots)
+//   odin run build.odin -file -- dev            build, then a server with a client joined (-sv_bots N for bots)
 //   odin run build.odin -file -- server         build, then the server alone
 //   odin run build.odin -file -- clean
 //
-// Options: -release, -no-build, -base DIR, -map NAME[,NAME...] (played in turn, a round
-// each), -port N; for the server -time-limit MINUTES and -score-limit N, and for dev
-// -bots N and -dodge (bots that change direction and jet at random in a fight). Anything
-// after the options goes to the client being run (dev -- -ping 120).
+// Options: -release and -no-build are this script's. Every other -name value goes to the
+// server as it was given, so its settings work here (-sv_map ctf_Ash,Arena -sv_bots 5
+// -sv_timelimit 3; server -cvars lists them). Anything after a -- goes to the client
+// instead (dev -- -net_ping 120 -cl_window).
 package main
 
 import "core:fmt"
@@ -27,24 +27,18 @@ Target :: struct {
 }
 
 TARGETS := [?]Target{{"client", "client"}, {"server", "server"}}
-LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer"} // checked and tested, never built alone
+LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer", "shared/cvar"} // checked and tested, never built alone
 
 Options :: struct {
 	release:  bool,
 	no_build: bool,
-	base:     string,
-	map_name: string,
 	port:     int,
-	bots:     int,  // dev: bots the server plays itself
-	dodge:    bool, // dev: and they dodge in a fight
-	rules:    [dynamic]string, // the server's round limits, passed on as given
-	extra:    []string, // forwarded to the program
+	server:   [dynamic]string, // settings passed to the server as they were given
+	extra:    []string,        // and these to the client, after a --
 }
 
 main :: proc() {
-	base := os.get_env("SOLDAT_BASE", context.allocator) // and otherwise beside this checkout
-	if base == "" do base = "assets"
-	opts := Options{base = base, map_name = "ctf_Ash", port = 23073}
+	opts := Options{port = 23073}
 	args := os.args[1:]
 	command := "check"
 	if len(args) > 0 && !strings.has_prefix(args[0], "-") {
@@ -56,16 +50,19 @@ main :: proc() {
 		switch args[i] {
 		case "-release":  opts.release = true
 		case "-no-build": opts.no_build = true
-		case "-base":     opts.base = value; i += 1
-		case "-map":      opts.map_name = value; i += 1
-		case "-port":     opts.port = strconv.parse_int(value) or_else opts.port; i += 1
-		case "-bots":     opts.bots = strconv.parse_int(value) or_else 0; i += 1
-		case "-dodge":    opts.dodge = true
-		case "-time-limit", "-score-limit": append(&opts.rules, args[i], value); i += 1
+		case "-sv_port":  opts.port = strconv.parse_int(value) or_else opts.port; i += 1
 		case "--":        opts.extra = args[i + 1:]; i = len(args)
 		case:
-			fmt.eprintfln("unknown option %s", args[i])
-			os.exit(2)
+			// every other setting is the server's, and goes to it as it was given
+			if !strings.has_prefix(args[i], "-") {
+				fmt.eprintfln("unknown command %s", args[i])
+				os.exit(2)
+			}
+			append(&opts.server, args[i])
+			if value != "" && !strings.has_prefix(value, "-") {
+				append(&opts.server, value)
+				i += 1
+			}
 		}
 	}
 
@@ -116,7 +113,7 @@ run_server :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	return run(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port)}, opts.rules[:], opts.extra))
+	return run(argv({exe("server"), "-sv_port", fmt.tprint(opts.port)}, opts.server[:], opts.extra))
 }
 
 // A server, with the bots asked for, and a client joined to it; everything stops when
@@ -125,13 +122,13 @@ dev :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	server, err := spawn(argv({exe("server"), "-base", opts.base, "-map", opts.map_name, "-port", fmt.tprint(opts.port), "-bots", fmt.tprint(opts.bots)}, opts.rules[:], opts.dodge ? {"-dodge"} : {}))
+	server, err := spawn(argv({exe("server"), "-sv_port", fmt.tprint(opts.port)}, opts.server[:]))
 	if err != nil {
 		fmt.eprintfln("could not start the server: %v", err)
 		return 1
 	}
 	defer stop(server)
-	return run(argv({exe("client"), "-join", "127.0.0.1", "-port", fmt.tprint(opts.port), "-base", opts.base}, opts.extra))
+	return run(argv({exe("client"), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
 }
 
 clean :: proc() -> int {

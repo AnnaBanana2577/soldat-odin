@@ -59,6 +59,7 @@ Game :: struct {
 	server_depth: u8,      // my commands waiting there, as the last update reported
 	depth:       f64,      // eased, which my clock steers by
 	time_scale:  f64,      // my tick rate against the server's
+	clock_target: f64,     // commands to keep waiting there (net_clock_target)
 	// what the prediction cost: the error at the last update, the worst and the mean,
 	// which the debug summary reports (it should be nil on a quiet line)
 	error_now, error_worst: f32,
@@ -75,7 +76,9 @@ MAX_FAST_FORWARD :: 40 // ticks another's bullet is flown on at most when it is 
 PENDING_KEPT     :: 64 // commands kept waiting for the server's word on them: a second
 
 // The sim's data every map shares, read from `base`, and an empty world for slot `me`.
-init :: proc(g: ^Game, base: string, me: u8) -> bool {
+// `interp_least` is how far behind the newest word of the others they are shown, at the
+// least, and `clock_target` how many commands to keep waiting on the server.
+init :: proc(g: ^Game, base: string, me: u8, interp_least: int, clock_target: f32) -> bool {
 	ok: bool
 	g.base = base
 	if g.anims, ok = sim.anims_load_files(base); !ok do return false
@@ -89,7 +92,8 @@ init :: proc(g: ^Game, base: string, me: u8) -> bool {
 	sim.world_init(&g.world, 0)
 	g.time_scale = 1
 	sim.round_init(&g.world.round)
-	view_init(&g.view)
+	view_init(&g.view, interp_least)
+	g.clock_target = f64(clock_target)
 	g.incoming = new(net.Message)
 	return true
 }

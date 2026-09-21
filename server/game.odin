@@ -53,10 +53,15 @@ Game :: struct {
 
 // What the server was started with.
 Rules :: struct {
-	maps:        []string, // played in turn, a round each
-	time_limit:  i32,      // ticks a round lasts at most; 0: the default
-	score_limit: i32,      // captures that win a round; 0: the default
-	max_rewind:  u32,      // ticks: how far back a shot is judged at most
+	maps:          []string, // played in turn, a round each
+	time_limit:    i32,      // ticks a round lasts at most
+	score_limit:   i32,      // captures that win a round
+	respawn_time:  i32,      // ticks a soldier waits to be placed again
+	max_grenades:  i32,
+	friendly_fire: bool,
+	kits_collide:  bool,
+	max_rewind:    u32,      // ticks: how far back a shot is judged at most
+	update_others: u32,      // ticks between words of the soldiers that are not the receiver's
 }
 
 Client :: struct {
@@ -85,8 +90,7 @@ Born :: struct {
 	to_shooter: bool, // the server's own making (a bot's, the map's): its soldier's client has not seen it
 }
 
-OTHERS_EVERY    :: 2  // ticks between words of the other soldiers: 30 a second. A client
-                      // hears of its own every tick, which is what it replays from
+
 OFFSCREEN_EVERY :: 15 // updates between words of a soldier out of the receiver's view: twice a second
 BORN_TOLD       :: 6  // ticks a bullet's birth keeps being told: three updates, so a lost one loses no bullet
 VIEW_HALF       :: sim.Vec2{900, 700} // of a client's view; generous: the camera leads toward the cursor
@@ -149,6 +153,10 @@ round_start :: proc(g: ^Game) {
 	sim.round_init(&w.round)
 	if g.rules.time_limit > 0 do w.round.time_left = g.rules.time_limit
 	if g.rules.score_limit > 0 do w.round.score_limit = g.rules.score_limit
+	if g.rules.respawn_time > 0 do w.round.respawn_time = g.rules.respawn_time
+	w.round.max_grenades = g.rules.max_grenades
+	w.round.friendly_fire = g.rules.friendly_fire
+	w.round.kits_collide = g.rules.kits_collide
 	sim.things_spawn(&g.ctx, w)
 	g.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
 	clear(&g.born)
@@ -484,8 +492,9 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 		active |= 1 << u32(i)
 		lags[i] = u8(min(g.clients[i].lag + 0.5, 255))
 	}
-	turn := w.tick / OTHERS_EVERY
-	others := w.tick % OTHERS_EVERY == 0
+	every := g.rules.update_others // a client hears of its own every tick: what it replays from
+	turn := w.tick / every
+	others := w.tick % every == 0
 	for &c, ri in g.clients {
 		if !c.connected || c.bot != nil do continue
 		me := &w.soldiers[ri]

@@ -12,19 +12,19 @@
 // and the world is drawn between the last two ticks. Everything the client is lives in
 // App; nothing else is global.
 //
-//   client -join IP [-port N] [-base DIR] [-name NAME] [-window]
-//          [-ping MS] [-jitter MS] [-loss PERCENT] [-headless]
+//   client -cl_join IP [-cl_port N] [-cl_name NAME] [-cl_window] [-cl_headless]
+//          [-net_ping MS] [-net_jitter MS] [-net_loss PERCENT]
 //
-// The client plays the maps the server names. -ping, -jitter and -loss put a simulated
-// bad line between this client and the server, for testing. -headless runs without a
-// window, its input scripted (input/script.odin): a player for the netcode's tests,
-// which reports what it saw with -seconds. The bots are the server's (-bots N there).
-// The debug options are in debug.odin.
+// Every setting is a cvar (settings.odin): config.cfg first, the command line over it,
+// `-cvars` to see them all. The client plays the maps the server names. net_ping,
+// net_jitter and net_loss put a simulated bad line between this client and the server,
+// for testing. cl_headless runs without a window, its input played by the bots' brain
+// (input/script.odin), and reports what it saw with dbg_seconds. The bots are the
+// server's (sv_bots there). What is only for looking at the game is in debug.odin.
 package client
 
 import "core:fmt"
 import "core:os"
-import "core:strconv"
 import "core:time"
 import rl "vendor:raylib"
 import "audio"
@@ -33,7 +33,6 @@ import "game"
 import "hud"
 import "input"
 import "render"
-import "../shared/net"
 import "../shared/sim"
 import "../shared/timer"
 
@@ -41,7 +40,7 @@ TICK :: sim.TICK
 MAX_FRAME :: 0.25 // a stall never turns into a burst of ticks
 
 App :: struct {
-	options:     Options,
+	settings:    Settings,
 	debug:       Debug,
 	conn:        connection.Connection,
 	game:        game.Game,
@@ -57,23 +56,14 @@ App :: struct {
 	quit:        bool,
 }
 
-Options :: struct {
-	base:         string,
-	join:         string,
-	port:         u16,
-	name:         string,
-	windowed:     bool,
-	headless:     bool, // no window: scripted input, for tests
-	ping, jitter, loss: f64, // the simulated line: round trip ms, extra ms at random, percent lost
-}
-
 app: App
 
 main :: proc() {
-	app.options, app.debug = parse_options()
-	o := &app.options
+	app.settings = settings_default()
+	settings_read(&app.settings)
+	o := &app.settings
 	if o.join == "" {
-		fmt.eprintln("usage: client -join IP [-port N] [-base DIR] [-name NAME] [-window] [-ping MS] [-jitter MS] [-loss PERCENT] [-headless]")
+		fmt.eprintln("which server? client -cl_join IP ... (-cvars lists every setting)")
 		os.exit(2)
 	}
 	if o.headless {
@@ -84,12 +74,12 @@ main :: proc() {
 	rl.SetTraceLogLevel(.WARNING)
 	open_window(o.windowed)
 	open_connection()
-	if !game.init(&app.game, o.base, app.conn.slot) do fail("could not load the game's data from %s", o.base)
+	if !game.init(&app.game, o.base, app.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
 	render.init(&app.render, o.base)
 	hud.init(&app.hud, o.base)
-	audio.init(&app.audio, o.base)
+	audio.init(&app.audio, o.base, o.volume)
 	app.camera.zoom = 1
-	debug_init(&app.debug, &app.game, &app.camera)
+	debug_init(&app.debug, o, &app.camera)
 
 	for !rl.WindowShouldClose() && !app.conn.lost && !app.quit {
 		dt := frame_seconds()
@@ -109,7 +99,7 @@ main :: proc() {
 		alpha := f32(app.accumulator / TICK) // how far into the next tick this frame is
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
 		rl.BeginDrawing()
-		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.debug.wireframe)
+		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.settings.wireframe)
 		hud.draw(&app.hud, &app.game, &app.camera, cursor(), alpha)
 		rl.EndDrawing()
 		debug_frame(&app.debug, dt)
@@ -127,13 +117,13 @@ main :: proc() {
 // The same client without a window, a picture or sound, its input scripted: a player
 // for the netcode's tests. Between ticks it sleeps, having nothing to draw.
 run_headless :: proc() {
-	o := &app.options
+	o := &app.settings
 	open_connection()
-	if !game.init(&app.game, o.base, app.conn.slot) do fail("could not load the game's data from %s", o.base)
+	if !game.init(&app.game, o.base, app.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
 	input.script_init(&app.script, u64(app.conn.slot) + 1)
 	timer.fine_sleep_begin() // this loop sleeps between ticks
 	defer timer.fine_sleep_end()
-	debug_init(&app.debug, &app.game, &app.camera)
+	debug_init(&app.debug, o, &app.camera)
 
 	for !app.conn.lost && !app.quit {
 		dt := frame_seconds()
@@ -156,9 +146,9 @@ run_headless :: proc() {
 
 // The server, and the simulated bad line if one was asked for.
 open_connection :: proc() {
-	o := &app.options
-	if !connection.open(&app.conn, o.join, o.port, o.name) do fail("could not reach %s", o.join)
-	connection.simulate_line(&app.conn, o.ping, o.jitter, o.loss)
+	o := &app.settings
+	if !connection.open(&app.conn, o.join, u16(o.port), o.name) do fail("could not reach %s", o.join)
+	connection.simulate_line(&app.conn, f64(o.ping), f64(o.jitter), f64(o.loss))
 }
 
 // How many ticks this frame owes: its time goes in at the pace that holds my commands
@@ -209,34 +199,3 @@ frame_seconds :: proc() -> f64 {
 	return dt
 }
 
-// Where the map and its art are read from: SOLDAT_BASE if it is set, and otherwise
-// the opensoldat assets beside this checkout. -base overrides both.
-default_base :: proc() -> string {
-	if set := os.get_env("SOLDAT_BASE", context.allocator); set != "" do return set
-	return "assets"
-}
-
-parse_options :: proc() -> (o: Options, d: Debug) {
-	o.base = default_base()
-	o.name = "Major"
-	o.port = net.DEFAULT_PORT
-	args := os.args[1:]
-	for i := 0; i < len(args); i += 1 {
-		next := i + 1 < len(args) ? args[i + 1] : ""
-		switch args[i] {
-		case "-base":   o.base = next; i += 1
-		case "-join":   o.join = next; i += 1
-		case "-port":   o.port = u16(strconv.parse_int(next) or_else net.DEFAULT_PORT); i += 1
-		case "-name":   o.name = next; i += 1
-		case "-window": o.windowed = true
-		case "-headless": o.headless = true
-		case "-ping":   o.ping, _ = strconv.parse_f64(next); i += 1
-		case "-jitter": o.jitter, _ = strconv.parse_f64(next); i += 1
-		case "-loss":   o.loss, _ = strconv.parse_f64(next); i += 1
-		case:
-			if debug_option(&d, args[i], next) do i += 1
-		}
-	}
-	if o.headless && o.name == "Major" do o.name = "Headless"
-	return
-}

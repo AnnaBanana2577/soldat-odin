@@ -32,10 +32,13 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              (the one place health changes), thing (flag, kit, dropped_gun, parachute,
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
              union), bot (the brain of the server's bots and of the test client), math
+shared/cvar/ the settings: a name, a value, a default and a line of help, set from
+             config.cfg and the command line
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
              Welcome, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction), Fake_Link
 shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
-client/      main (each subsystem opened, the loop, each closed), debug, and a package
+client/      main (each subsystem opened, the loop, each closed), settings (every cl_,
+             net_, snd_, r_ and dbg_ setting), debug, and a package
              per subsystem:
   connection/  the link to the server, the simulated bad line
   game/        the world: game (the tick: receive / step / send), predict (my own
@@ -48,8 +51,9 @@ client/      main (each subsystem opened, the loop, each closed), debug, and a p
   hud/         what is drawn over the world: hud (the bars and counts, the messages,
                the crosshair), kill_feed, weapons_menu, team_menu, scoreboard, chat
   audio/       audio
-server/      main (init / server_loop / cleanup), game (the tick), queue (a client's
-             commands and which of them this tick runs), connection
+server/      main (init / server_loop / cleanup), settings (every sv_ setting), game
+             (the tick), queue (a client's commands and which of them this tick runs),
+             connection
 ```
 
 The client, client/main.odin:
@@ -70,7 +74,7 @@ until the window closes:
 close audio, hud, render, game, connection, window
 ```
 
-A headless client (-headless) runs the same without the window, the picture and the
+A headless client (cl_headless) runs the same without the window, the picture and the
 sound (run_headless), played by the bots' brain: a player for testing the netcode.
 
 The server's tick, server/game.odin, reads the same way:
@@ -93,34 +97,37 @@ odin run build.odin -file -- check          type-check every package (with the v
 odin run build.odin -file -- build          compile the client and the server into build/
 odin run build.odin -file -- test           run the package tests
 odin run build.odin -file -- dev            build, then a server with a client joined
-odin run build.odin -file -- dev -bots 2    the same with two bots in it
+odin run build.odin -file -- dev -sv_bots 2 the same with two bots in it
 odin run build.odin -file -- server         build, then the server alone
 ```
 
-The server links no raylib. The maps and the art are opensoldat's own, in assets/ here
-(SOLDAT_BASE, or -base DIR, plays another set of them; -map NAME picks another map, and
-the clients play the map the server names). Anything after a second -- goes to the
-program:
+The server links no raylib. The maps and the art are opensoldat's own, in assets/ here.
+
+Every setting is a cvar (shared/cvar): config.cfg is read at startup and the command
+line has the last word, and `client -cvars` or `server -cvars` prints them all with what
+they are set to. One config.cfg serves both, each taking what is its own. The build
+script keeps -release and -no-build for itself and passes every other -name value to the
+server, so its settings work here; anything after a second -- goes to the client:
 
 ```
-odin run build.odin -file -- dev -- -window          in a window instead of borderless fullscreen
-odin run build.odin -file -- dev -- -wire -zoom 0.3  the polygons as lines, the view closer
-odin run build.odin -file -- dev -- -hold right,fire -aim 200,0 -screenshot out.png
-odin run build.odin -file -- dev -bots 2 -- -ping 120 -jitter 30 -loss 5
-odin run build.odin -file -- dev -bots 4 -map ctf_Ash,Arena -time-limit 2 -score-limit 3
+odin run build.odin -file -- dev -- -cl_window           in a window, not borderless fullscreen
+odin run build.odin -file -- dev -- -r_wire -r_zoom 0.3  the polygons as lines, the view closer
+odin run build.odin -file -- dev -- -dbg_hold right,fire -dbg_aim 200,0 -dbg_screenshot out.png
+odin run build.odin -file -- dev -sv_bots 2 -- -net_ping 120 -net_jitter 30 -net_loss 5
+odin run build.odin -file -- dev -sv_bots 4 -sv_map ctf_Ash,Arena -sv_timelimit 2 -sv_scorelimit 3
 ```
 
 The third is a scripted run for checks without a person at the screen: it holds the
 buttons, aims at an offset from the soldier, writes the frame after two seconds and
-quits with a line of counts (-seconds N for a longer run). The debug options live in
-client/debug.odin and nowhere else. The last puts a simulated bad line between that
-client and the server: a round trip of 120 ms, up to 30 ms more at random, one packet
-in twenty lost (shared/net/fakelink.odin; a lost reliable packet is resent a round
-trip and a half later, and those behind it wait). The next plays ctf_Ash and Arena in
-turn, a round each, a round ending after two minutes or three captures (the defaults
-are fifteen and ten). trip and a half later, and those behind it wait). The bots are the server's own
-(-bots N; with -dodge they change direction and jet at random in a fight, as a person
-does). -port N picks another port on the server and the client alike.
+quits with a line of counts (dbg_seconds N for a longer run). What is only for looking
+at the game is under r_ and dbg_, in client/debug.odin and nowhere else. The fourth puts
+a simulated bad line between that client and the server: a round trip of 120 ms, up to
+30 ms more at random, one packet in twenty lost (shared/net/fakelink.odin; a lost
+reliable packet is resent a round trip and a half later, and those behind it wait). The
+last plays ctf_Ash and Arena in turn, a round each, a round ending at two minutes or
+three captures (the defaults are fifteen and ten); sv_bots_dodge makes the bots change
+direction and jet at random in a fight, as a person does, and sv_base or SOLDAT_BASE
+plays another set of maps and art.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
@@ -228,8 +235,8 @@ Y to your team; Enter sends it, Esc lets it go.
     (client/game/view.odin). Every Input names that tick, and the
     difference from the tick it arrives in is the client's lag, measured per packet. A
     bullet keeps the lag of the packet it came in and meets the soldiers as they were
-    that long ago (sim/history.odin), for as long as it flies, up to a cap (-max-rewind
-    MS, 300 by default; past it a shooter leads). The others fly that bullet on by the
+    that long ago (sim/history.odin), for as long as it flies, up to a cap (sv_maxrewind,
+    300 ms by default; past it a shooter leads). The others fly that bullet on by the
     ticks since its birth, its shooter's lag and their own: the server will rule it
     against me as I was my own lag ago, so the bullet that will be ruled to hit me is
     that far ahead of the one the server spawned. Soldat's rule: my ping plus the
@@ -274,13 +281,13 @@ Y to your team; Enter sends it, Esc lets it go.
 - Bots: the server plays them itself, with no client and no connection: each tick a
   small brain (shared/sim/bot.odin) reads the server's world and gives the bot's
   command (run at the nearest enemy, jet when it is above, jump when stuck, fire with
-  line of sight in range). The server's -bots N adds them, -dodge makes them dodge.
-- Tests without a person: the client's -headless has no window and is played by the
-  bots' brain, through a real connection, and with -seconds N it quits with a summary:
+  line of sight in range). The server's sv_bots adds them, sv_bots_dodge makes them dodge.
+- Tests without a person: the client's cl_headless has no window and is played by the
+  bots' brain, through a real connection, and with dbg_seconds it quits with a summary:
   the hits it saw itself give and take, how far behind it showed the world, and what
   went over the wire. The server's leave line says how many of those hits it ruled,
   and how far back that client's shots were judged: the two agreeing is the measure
-  of the netcode. A simulated bad line (-ping, -jitter, -loss) sits on any client.
+  of the netcode. A simulated bad line (net_ping, net_jitter, net_loss) sits on any client.
   The test command runs the wire format's tests.
 - The scoreboard (the original's frags menu), toggled with F1 and shown at every round's
   end with who won and the countdown to the next: the map and the time left, and each
