@@ -46,18 +46,37 @@ map_view_unload :: proc(v: ^Map_View) {
 	v^ = {}
 }
 
+// The pieces of a map, so a caller can leave some out. The game always draws the lot;
+// the editor turns them off to see what is underneath.
+Map_Part :: enum {
+	Background, // the sky gradient
+	Polygons,   // the terrain meshes
+	Scenery,    // the props
+	Wireframe,  // the polygon edges, over everything
+}
+Map_Parts :: bit_set[Map_Part]
+
+ALL_PARTS :: Map_Parts{.Background, .Polygons, .Scenery}
+
 // The map and nothing else, in the original's layer order. The game draws the same
 // pieces but slots the living things between them; see render.draw.
 // Between the caller's BeginMode2D and EndMode2D.
-map_view_draw :: proc(v: ^Map_View, camera: ^Camera, wireframe := false) {
+map_view_draw :: proc(v: ^Map_View, camera: ^Camera, parts := ALL_PARTS) {
 	if v.level == nil do return
-	draw_background(v.level, camera)
-	if v.meshes.built do draw_mesh_now(v.meshes.background, v.meshes.material)
-	draw_scenery(v, 0)
-	draw_scenery(v, 1)
-	if v.meshes.built do draw_mesh_now(v.meshes.terrain, v.meshes.material)
-	draw_scenery(v, 2)
-	if wireframe do draw_wireframe(v.level)
+	// A map's triangles wind either way, and raylib culls back faces by default, so the
+	// polygon meshes come out empty without this. The game's draw does the same thing
+	// for the same reason.
+	rlgl.DisableBackfaceCulling()
+
+	if .Background in parts do draw_background(v.level, camera)
+	if .Polygons in parts && v.meshes.built do draw_mesh_now(v.meshes.background, v.meshes.material)
+	if .Scenery in parts {
+		draw_scenery(v, 0)
+		draw_scenery(v, 1)
+	}
+	if .Polygons in parts && v.meshes.built do draw_mesh_now(v.meshes.terrain, v.meshes.material)
+	if .Scenery in parts do draw_scenery(v, 2)
+	if .Wireframe in parts do draw_wireframe(v.level)
 }
 
 // The box the map's polygons fill, which is what a view frames when a map opens.
