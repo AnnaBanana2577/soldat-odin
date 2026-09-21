@@ -6,6 +6,7 @@
 //   odin run build.odin -file -- test           run the package tests
 //   odin run build.odin -file -- dev            build, then a server with a client joined (-sv_bots N for bots)
 //   odin run build.odin -file -- server         build, then the server alone
+//   odin run build.odin -file -- editor         build, then the map editor (-- -cl_map ctf_Ash)
 //   odin run build.odin -file -- clean
 //
 // Options: -release and -no-build are this script's. Every other -name value goes to the
@@ -73,6 +74,7 @@ main :: proc() {
 	case "test":   os.exit(run_tests(opts))
 	case "dev":    os.exit(dev(opts))
 	case "server": os.exit(run_server(opts))
+	case "editor": os.exit(editor(opts))
 	case "clean":  os.exit(clean())
 	case:
 		fmt.eprintfln("unknown command %s", command)
@@ -130,6 +132,14 @@ dev :: proc(opts: Options) -> int {
 	}
 	defer stop(server)
 	return run(argv({exe("client"), "-cl_base", assets(), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
+}
+
+// The map editor: the client, pointed at the assets, with no server and no soldier.
+editor :: proc(opts: Options) -> int {
+	if !opts.no_build {
+		if code := build_all(opts); code != 0 do return code
+	}
+	return run(argv({exe("client"), "-cl_base", assets(), "-cl_editor"}, opts.extra))
 }
 
 clean :: proc() -> int {
