@@ -3,6 +3,35 @@
 What is left. The readme says how the netcode works (the model, at the top) and what it
 measured; this says what it does not do yet. Checked against the code on 2026-09-21.
 
+- Bots bullets are invisible
+- Death ragdolls have weird physics currently
+- Weps menu after spawn not working
+- Spawn timer remove
+- HUD parity
+  - Big Messages for everything
+  - Parity gaps in things that exist:
+  - Crosshair doesn't grow with bink — hit_spray is in the sim
+  - Sniper line missing
+  - Kill feed and console each draw in one colour; the original colours by kind (join, vote, death, server)
+  - Scoreboard: no spectators, no PageUp/PageDown scrolling, shows the map name where a server name belongs
+  - Shirt colours are team colours — the roster carries names only, so this needs a wire change
+  - Cease-fire counter draws always; the original draws it in survival mode only
+  Missing outright:
+    7. Weapon stats page (F2)
+    8. Radio menu (V)
+    9. Key binds in settings, with the original's as defaults
+    10. Spectators — team menu, scoreboard section, free camera, server support
+    11. Interface read from the interface-gfx archive and its .ini rather than fixed in code
+- Chat/commands
+- Game modes and match lifecycle
+- Modifiers
+- -----
+- Netcode fixes
+- Lobby
+- Demos
+- Map editor
+- Editor for po and poa
+
 ## Netcode
 
 - Another's bullet on my screen dies where my own world finds the collision, not where
