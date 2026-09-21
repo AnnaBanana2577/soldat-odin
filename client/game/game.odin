@@ -215,8 +215,9 @@ receive_fired :: proc(g: ^Game, f: ^net.Fired, update_tick: u32) {
 	g.seen_shot[f.shooter] = f.seq
 	index, ok := sim.bullet_spawn(&g.ctx, &g.world, f.pos, f.vel, f.weapon, f.shooter, g.ctx.weapons[f.weapon].damage, &g.events)
 	if !ok do return
-	since := int(g.view.tick - update_tick) + int(f.age)
-	sim.bullet_fast_forward(&g.ctx, &g.world, index, min(since + int(f.lag) + g.my_lag, MAX_FAST_FORWARD), &g.events)
+	// signed: the shown tick sits behind the newest word, so this is normally negative
+	since := int(g.view.tick) - int(update_tick) + int(f.age)
+	sim.bullet_fast_forward(&g.ctx, &g.world, index, clamp(since + int(f.lag) + g.my_lag, 0, MAX_FAST_FORWARD), &g.events)
 }
 
 // Where one of my own bullets ended. I flew it myself from the same command, so it is
