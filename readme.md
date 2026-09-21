@@ -35,7 +35,7 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
 shared/cvar/ the settings: a name, a value, a default and a line of help, set from
              config.cfg and the command line
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,
-             Welcome, Map, Roster, Input, Act, Chat, Update, Things, Facts, Correction), Fake_Link
+             Welcome, Map, Roster, Input, Act, Chat, Update, Things, Facts), Fake_Link
 shared/timer/  a fine sleep on Windows, for the loops that sleep between ticks
 client/      main (each subsystem opened, the loop, each closed), settings (every cl_,
              net_, snd_, r_ and dbg_ setting), debug, and a package
@@ -213,13 +213,10 @@ Y to your team; Enter sends it, Esc lets it go.
     Every placing of a soldier (a spawn, a respawn, a new round) is told as a fact and
     every client places that soldier on it, so nobody lingers where they were.
   - The server steps every soldier every tick: its bots on their brain's command, and
-    the players as a guess from their last keys (soldier_reckon), the same guess every
-    client makes of them. Then each client's word replaces the guess. Because its
-    world has authority, what those steps cause counts: a wound from lava, a fall off
-    the map. It checks each shot before it flies (a weapon the soldier holds, a token
-    bucket on the fire rate, the muzzle near the soldier, no faster than the weapon
-    shoots, not under cease fire) and refuses a soldier that moved further than one
-    can, putting it back (Correction).
+    the players on the commands their queues give for that tick. Because its world has
+    authority, what those steps cause counts: a wound from lava, a fall off the map, a
+    bullet fired. Nothing a client sends is taken on trust, because nothing but the keys
+    is sent: the server runs the sim itself.
   - Every other tick each client gets an Update: which slots are in play, the soldiers
     in its view (its own with only the server's half: health, death, the flag, the
     tally), the ones out of view twice a second, and the bullets born lately whose line
