@@ -4,6 +4,8 @@ An Odin port of Soldat on raylib and ENet: a server-authoritative game, and the 
 to make things for it in the same binary. A map editor is here; a .po and .poa editor
 and a mod maker are to come.
 
+![A soldier on a capture-the-flag map, with the HUD: health and jets, the Ak-74 and its ammo, the flags and the scores, and the round trip of the simulated line in the corner](screenshot.png)
+
 The netcode is the Quake 3 model on a fixed timestep.
 
 - **Server-authoritative snapshots.** The server runs the one true world and decides
