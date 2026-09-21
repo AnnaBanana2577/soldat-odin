@@ -8,6 +8,7 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
 - Death ragdolls have weird physics currently
 - Weps menu after spawn not working
 - Spawn timer remove
+- Flag throws
 - HUD parity
   - Big Messages for everything
   - Parity gaps in things that exist:
@@ -25,6 +26,7 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
     11. Interface read from the interface-gfx archive and its .ini rather than fixed in code
 - Chat/commands
 - Game modes and match lifecycle
+- Polygon types?
 - Modifiers
 - -----
 - Netcode fixes
