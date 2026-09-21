@@ -59,7 +59,10 @@ odin run build.odin -file -- test           run the package tests
 odin run build.odin -file -- dev            build, then a server with a client joined
 odin run build.odin -file -- dev -sv_bots 2 the same with two bots in it
 odin run build.odin -file -- server         build, then the server alone
+odin run build.odin -file -- editor         build, then the map editor, no server
 ```
+
+The editor opens on the maps in assets/; `-- -cl_map ctf_Ash` opens one straight away.
 
 The server links no raylib. The maps and the art are opensoldat's own, in assets/ here.
 
