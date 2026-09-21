@@ -78,6 +78,23 @@ Prop :: struct {
 	level:         u8, // 0 behind the map, 1 in front of it, 2 in front of the players
 }
 
+MAX_WAYPOINTS   :: 5000
+MAX_CONNECTIONS :: 20
+
+// One point of the path net the map author laid for the bots: where it is, which keys
+// to hold on the way there, whose path it belongs to, whether to wait on it, and the
+// waypoints it leads on to. The numbering is the file's own, 1-based with 0 for none,
+// because that is what the connections hold; waypoints[0] is a blank one.
+Waypoint :: struct {
+	active:      bool,
+	pos:         Vec2,
+	left, right, up, down, jet: bool,
+	path:        u8, // the team whose bots follow it, 0 any
+	action:      u8, // 0 none, 1 stop and camp, 2-6 wait 1, 5, 10, 15 or 20 seconds
+	connections: [MAX_CONNECTIONS]i32,
+	count:       int, // of them
+}
+
 Level :: struct {
 	name:             string,
 	texture:          string,
@@ -94,13 +111,14 @@ Level :: struct {
 	sectors_num:      i32,
 	sectors:          [][]u16, // (2n+1)^2 grid of poly indices, see sector_at
 	spawnpoints:      []Spawnpoint,
+	waypoints:        []Waypoint, // the bots' paths; 1-based, [0] a blank
 	colliders:        []Collider,
 	props:            []Prop,
 	scenery:          []string, // image names props refer to by 1-based style
 }
 
 Level_Error :: enum {
-	None, Too_Many_Polys, Bad_Sectors, Too_Many_Props, Too_Many_Colliders, Too_Many_Spawnpoints,
+	None, Too_Many_Polys, Bad_Sectors, Too_Many_Props, Too_Many_Colliders, Too_Many_Spawnpoints, Too_Many_Waypoints,
 }
 
 @(private = "file")
@@ -291,7 +309,32 @@ level_load :: proc(data: []u8, allocator := context.allocator) -> (m: Level, err
 		s.pos = {f32(x), f32(y)}
 		if abs(x) >= 2_000_000 || abs(y) >= 2_000_000 do s.active = false
 	}
-	// waypoints follow; the bots here do not use them
+	// The waypoints the bots walk (bot_path.odin), numbered from 1 as their own
+	// connections refer to them.
+	waypoint_count := int(take_i32(&r))
+	if waypoint_count < 0 || waypoint_count > MAX_WAYPOINTS do return m, .Too_Many_Waypoints
+	m.waypoints = make([]Waypoint, waypoint_count + 1)
+	for &p in m.waypoints[1:] {
+		p.active = take_u8(&r) != 0
+		r.pos += 3
+		_ = take_i32(&r) // the editor's own numbering, which nothing reads
+		x := i32(take_i32(&r))
+		y := i32(take_i32(&r))
+		p.pos = {f32(x), f32(y)}
+		p.left = take_u8(&r) != 0
+		p.right = take_u8(&r) != 0
+		p.up = take_u8(&r) != 0
+		p.down = take_u8(&r) != 0
+		p.jet = take_u8(&r) != 0
+		p.path = take_u8(&r)
+		p.action = take_u8(&r)
+		r.pos += 5
+		p.count = clamp(int(take_i32(&r)), 0, MAX_CONNECTIONS)
+		for &c in p.connections {
+			c = i32(take_i32(&r))
+			if c < 0 || int(c) > waypoint_count do c = 0 // a connection to nowhere
+		}
+	}
 	return m, .None
 }
 
@@ -307,6 +350,7 @@ level_destroy :: proc(m: ^Level, allocator := context.allocator) {
 	for s in m.sectors do delete(s)
 	delete(m.sectors)
 	delete(m.spawnpoints)
+	delete(m.waypoints)
 	delete(m.colliders)
 	m^ = {}
 }

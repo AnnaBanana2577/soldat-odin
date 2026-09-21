@@ -1,5 +1,7 @@
 package sim
 
+import "core:strings"
+
 // The weapons: names, how they reload and fire, and the balance numbers. The defaults
 // are Soldat 1.7.1's, which is also OpenSoldat's built-in table; a server's weapons
 // mod overrides them. Ported from Weapons.pas by way of the old Odin port.
@@ -125,6 +127,15 @@ WEAPON_DEFAULTS := #partial [Weapon_Id]Weapon_Stats{
 	.M2      = {1.8,    10,  100, 366,   36,    .M2,           0,      0,   0,       0,     0.0088,  0,      1.1,  0.95, 0.85},
 	.None    = {330,    6,   1,   3,     5,     .Punch,        0,      0,   0,       0,     0,       0,      1.15, 1,    0.9},
 	.Frag    = {1500,   80,  1,   20,    5,     .Frag_Grenade, 0,      0,   0,       0,     0,       1,      1.0,  1.0,  1.0},
+}
+
+// The weapon with this display name, bare hands when there is none.
+weapon_named :: proc(name: string) -> Weapon_Id {
+	if name == "" do return .None
+	for base, id in WEAPON_BASE {
+		if strings.equal_fold(base.name, name) do return id
+	}
+	return .None
 }
 
 Weapons :: [Weapon_Id]Weapon_Info

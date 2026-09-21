@@ -77,6 +77,12 @@ slot_of :: proc(h: ^Host, peer: ^enet.Peer) -> int {
 	return NO_SLOT
 }
 
+// Shown the door: the peer is told to go, and the leave that follows it is the
+// ordinary one.
+host_kick :: proc(h: ^Host, slot: u8) {
+	if h.peers[slot] != nil do enet.peer_disconnect(h.peers[slot], 0)
+}
+
 host_send :: proc(h: ^Host, slot: u8, data: []u8, reliable: bool) {
 	if slot == NO_SLOT do return
 	peer_send(h.peers[slot], data, reliable)

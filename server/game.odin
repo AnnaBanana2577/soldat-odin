@@ -42,6 +42,9 @@ Game :: struct {
 	events:     sim.Events,  // this tick's
 	map_name:   string,
 	clients:    [sim.MAX_PLAYERS]Client,
+	bots:       sim.Bots,           // the brains of the slots the server plays itself
+	profiles:   []sim.Bot_Profile, // the personality files they are drawn from
+	vote:       Vote,              // what is being voted on, if anything (vote.odin)
 	born:       [dynamic]Born,            // the bullets born lately, each told a few updates running
 	ends:       [dynamic]Ended,           // and where the clients' own ended, told back to them
 	shot_seq:   [sim.MAX_PLAYERS]u32,     // the last number given to each shooter's bullets
@@ -62,13 +65,16 @@ Rules :: struct {
 	kits_collide:  bool,
 	max_rewind:    u32,      // ticks: how far back a shot is judged at most
 	update_others: u32,      // ticks between words of the soldiers that are not the receiver's
+	bots_difficulty: int,    // 300 stupid, 100 normal, 10 impossible
+	bots_chat:     bool,     // the bots say what their files give them to say
+	vote_percent:  int,      // of the players who can vote, how many must agree for one to pass
 }
 
 Client :: struct {
 	connected:  bool,
 	name:       net.Name,
 	last_chat:  u32, // the tick it last said something
-	bot:        Maybe(sim.Bot), // played by the server itself (sim/bot.odin): no peer, nothing received or sent
+	bot:        bool, // played by the server itself (sim/bot.odin): no peer, nothing received or sent
 	queue:      Queue, // what it pressed, and what of that the sim has yet to run
 	lag:        f32,   // how late it sees the world, in ticks, smoothed: told back to it
 	// for the leave line: the hits it gave and took as ruled here, which its own summary
@@ -108,6 +114,7 @@ game_init :: proc(g: ^Game, base: string, rules: Rules) -> bool {
 	g.ctx.anims = g.anims
 	g.ctx.skeletons = g.skeletons
 	sim.weapons_default(&g.ctx.weapons)
+	g.profiles = sim.bot_profiles_load(base)
 	sim.world_init(&g.world, 1)
 	g.world.authority = true
 	g.world.history = &g.history
@@ -171,7 +178,9 @@ tick :: proc(g: ^Game, host: ^Host) {
 	step_soldiers(g)
 	receive(g, host)
 	step_world(g)
+	vote_tick(g, host)
 	sim.history_record(&g.history, &g.world) // under this tick, as the update of this tick tells them
+	bot_chat(g, host)
 	send(g, host)
 	sim.events_clear(&g.events)
 	g.world.tick += 1
@@ -190,8 +199,8 @@ step_soldiers :: proc(g: ^Game) {
 		if !c.connected do continue
 		slot := u8(i)
 		before := g.events.count
-		if brain, is_bot := &c.bot.?; is_bot {
-			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(brain, &g.ctx, w, slot), &g.events)
+		if c.bot {
+			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(&g.bots, &g.ctx, w, slot), &g.events)
 		} else {
 			for cmd in queue_take(&c.queue, buf[:]) do sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
 		}
@@ -222,6 +231,8 @@ receive :: proc(g: ^Game, host: ^Host) {
 		case net.Input: receive_input(g, p.slot, &m)
 		case net.Act:   receive_act(g, host, p.slot, m)
 		case net.Chat:  receive_chat(g, host, p.slot, &m)
+		case net.Vote:  receive_vote(g, host, p.slot, &m)
+		case net.Map_Query: receive_map_query(g, host, p.slot, &m)
 		}
 	}
 	for slot in host.left do leave(g, host, slot)
@@ -273,7 +284,7 @@ receive_chat :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Chat) {
 	}
 	team := g.world.soldiers[slot].team
 	for &o, i in g.clients {
-		if o.connected && o.bot == nil && g.world.soldiers[i].team == team do send_message(g, host, u8(i))
+		if o.connected && !o.bot && g.world.soldiers[i].team == team do send_message(g, host, u8(i))
 	}
 }
 
@@ -326,6 +337,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	}
 	host_bind(host, slot, peer)
 	g.clients[slot] = {connected = true, name = net.name_make(m.name)}
+	bot_friends(g) // one of them may have named this player as its friend
 	g.outgoing = net.Welcome{slot = slot}
 	send_message(g, host, slot)
 	g.outgoing = map_message(g)
@@ -341,18 +353,65 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", m.name, team))
 }
 
-// A bot, in the first free slot, on the smaller team.
-add_bot :: proc(g: ^Game, dodge: bool) {
+// A bot, in the first free slot, on the smaller team: a personality file at random
+// that nobody here is playing already, and a brain to go with it.
+add_bot :: proc(g: ^Game) {
 	slot := free_slot(g)
 	if slot == NO_SLOT do return
-	brain: sim.Bot
-	sim.bot_init(&brain, u64(time.now()._nsec), dodge)
-	g.clients[slot] = {connected = true, bot = brain, name = net.name_make(BOT_NAMES[int(slot) % len(BOT_NAMES)])}
+	seed := u64(time.now()._nsec)
+	prof: sim.Bot_Profile
+	for _ in 0 ..< 16 {
+		prof = sim.bot_profile_any(g.profiles, &seed)
+		if !name_taken(g, prof.name) do break
+	}
+	sim.bot_init(&g.bots[slot], prof, seed, g.rules.bots_difficulty, g.rules.bots_chat)
+	g.clients[slot] = {connected = true, bot = true, name = net.name_make(prof.name)}
+	bot_friends(g)
 	team := spawn_newcomer(g, slot)
-	fmt.printfln("a bot joined as slot %d on %v", slot, team)
+	fmt.printfln("%s joined as slot %d on %v", prof.name, slot, team)
 }
 
-BOT_NAMES := [?]string{"Dutch", "Blain", "Poncho", "Billy", "Mac", "Hawkins", "Dillon", "Anna"}
+name_taken :: proc(g: ^Game, name: string) -> bool {
+	for &c in g.clients do if c.connected && net.text_string(&c.name) == name do return true
+	return false
+}
+
+// The friend each bot's file names, as a slot: it will not shoot at them. Worked out
+// whenever the roster changes, since a name is all the file has.
+bot_friends :: proc(g: ^Game) {
+	for &b, i in g.bots {
+		if !b.playing do continue
+		b.friend = sim.NOBODY
+		if b.prof.friend == "" do continue
+		for &c, k in g.clients {
+			if c.connected && k != i && net.text_string(&c.name) == b.prof.friend do b.friend = u8(k)
+		}
+	}
+}
+
+// What the bots want to say, once a tick: their own lines, and the taunt that names
+// whoever they are shooting at.
+bot_chat :: proc(g: ^Game, host: ^Host) {
+	for &b, i in g.bots {
+		if !b.playing do continue
+		line := b.says
+		if b.taunts != sim.NOBODY {
+			if b.taunts < sim.MAX_PLAYERS && g.clients[b.taunts].connected {
+				line = fmt.tprintf("Die %s!", net.text_string(&g.clients[b.taunts].name))
+			}
+			b.taunts = sim.NOBODY
+		}
+		b.says = ""
+		c := &g.clients[i]
+		if line == "" || (c.last_chat != 0 && g.world.tick - c.last_chat < CHAT_EVERY) do continue
+		c.last_chat = g.world.tick
+		chat := net.Chat{slot = u8(i)}
+		net.text_set(&chat.text, line)
+		fmt.printfln("[%s] %s", net.text_string(&c.name), line)
+		g.outgoing = chat
+		send_message(g, host, EVERYONE)
+	}
+}
 
 // Who plays in which slot, to everyone, whenever someone joins. It is small.
 send_roster :: proc(g: ^Game, host: ^Host) {
@@ -361,7 +420,7 @@ send_roster :: proc(g: ^Game, host: ^Host) {
 		if !c.connected do continue
 		roster.slots[roster.count] = u8(i)
 		roster.names[roster.count] = c.name
-		if c.bot != nil do roster.bots |= 1 << u32(i)
+		if c.bot do roster.bots |= 1 << u32(i)
 		roster.count += 1
 	}
 	g.outgoing = roster
@@ -394,7 +453,10 @@ leave :: proc(g: ^Game, host: ^Host, slot: u8) {
 	fmt.printfln("slot %d left: %d shots, %d hits given and %d taken as ruled here, judged %.0f ms back on average",
 		slot, c.shots, c.hits_given, c.hits_taken, f64(c.judged) / f64(max(c.shots, 1)) * 1000 / sim.TICK_RATE)
 	g.world.soldiers[slot].active = false
+	g.bots[slot] = {}
+	if g.vote.active && g.vote.kind == .Kick && g.vote.target == slot do stop_vote(g, host) // it left of its own accord
 	c^ = {}
+	bot_friends(g)
 }
 
 // ---- the world ----
@@ -411,9 +473,10 @@ step_world :: proc(g: ^Game) {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, w, hit, &g.events)
 	}
 	for e in sim.events_slice(&g.events) {
-		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && g.clients[v.owner].bot == nil {
+		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && !g.clients[v.owner].bot {
 			append(&g.ends, Ended{owner = v.owner, end = {shot = v.shot, pos = v.pos, impact = v.impact}, tick = g.world.tick})
 		}
+		sim.bot_event(&g.bots, w, e)
 		if v, wounded := e.(sim.Damage); wounded && v.attacker != v.target {
 			g.clients[v.attacker].hits_given += 1
 			g.clients[v.target].hits_taken += 1
@@ -496,7 +559,7 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 	turn := w.tick / every
 	others := w.tick % every == 0
 	for &c, ri in g.clients {
-		if !c.connected || c.bot != nil do continue
+		if !c.connected || c.bot do continue
 		me := &w.soldiers[ri]
 		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
 		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, round = w.round, active = active, lags = lags}

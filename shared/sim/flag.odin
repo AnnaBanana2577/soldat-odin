@@ -32,6 +32,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 		t.pos[0] = pose[7] // the hand the flag hangs from
 		t.forces[1].y += FLAG_HOLDING_FORCEUP * w.gravity
 		t.timeout = FLAG_TIMEOUT
+		t.interest = FLAG_INTEREST_TIME // a flag on the move is worth chasing again
 	}
 	home := flag_home(w, t.style)
 	t.in_base = vec2_length(t.pos[0] - home) < BASE_RADIUS

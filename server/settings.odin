@@ -18,7 +18,9 @@ Settings :: struct {
 	maps:        string, // one name, or several in turn, a round each
 	port:        int,
 	bots:        int,
-	bots_dodge:  bool,
+	bots_difficulty: int, // 300 stupid, 100 normal, 10 impossible
+	bots_chat:   bool,
+	vote_percent: int, // of those who can vote, how many must agree
 	time_limit:  f32, // minutes a round lasts
 	score_limit: int, // captures that win it
 	respawn:     f32, // seconds a soldier waits to be placed again
@@ -41,6 +43,9 @@ settings_default :: proc() -> Settings {
 		respawn       = f32(sim.DEFAULT_RESPAWN_TIME) / sim.TICK_RATE,
 		grenades      = int(sim.DEFAULT_MAX_GRENADES),
 		kits_collide  = true,
+		bots_difficulty = 100,
+		bots_chat     = true,
+		vote_percent  = 60,
 		max_rewind    = 300,
 		update_others = 2,
 		config        = "config.cfg",
@@ -52,7 +57,8 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "sv_map", &s.maps, "the map, or several by comma, played in turn a round each")
 	cvar.add(c, "sv_port", &s.port, "the port to listen on")
 	cvar.add(c, "sv_bots", &s.bots, "bots the server plays itself")
-	cvar.add(c, "sv_bots_dodge", &s.bots_dodge, "and they dodge in a fight, as a person does")
+	cvar.add(c, "sv_bots_difficulty", &s.bots_difficulty, "how well they aim: 300 stupid, 100 normal, 10 impossible")
+	cvar.add(c, "sv_bots_chat", &s.bots_chat, "and they say what their personality files give them to say")
 	cvar.add(c, "sv_timelimit", &s.time_limit, "minutes a round lasts")
 	cvar.add(c, "sv_scorelimit", &s.score_limit, "captures that win a round")
 	cvar.add(c, "sv_respawn_time", &s.respawn, "seconds a soldier waits to be placed again")
@@ -61,6 +67,7 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "sv_kits_collide", &s.kits_collide, "bullets and blasts knock the kits about")
 	cvar.add(c, "sv_maxrewind", &s.max_rewind, "ms: how far back a shot is judged at most")
 	cvar.add(c, "sv_update_others", &s.update_others, "ticks between words of the other soldiers")
+	cvar.add(c, "sv_votepercent", &s.vote_percent, "percent of the players who can vote that must agree for one to pass")
 	cvar.add(c, "sv_config", &s.config, "the settings file read at startup")
 	cvar.add(c, "cvars", &s.list_cvars, "print every setting and what it is set to, and stop")
 }

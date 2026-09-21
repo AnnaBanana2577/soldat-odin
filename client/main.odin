@@ -100,7 +100,7 @@ main :: proc() {
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
 		rl.BeginDrawing()
 		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.settings.wireframe)
-		hud.draw(&app.hud, &app.game, &app.camera, cursor(), alpha)
+		hud.draw(&app.hud, &app.game, &app.render, &app.camera, cursor(), alpha)
 		rl.EndDrawing()
 		debug_frame(&app.debug, dt)
 		free_all(context.temp_allocator) // the frame's scratch: its strings
@@ -120,7 +120,7 @@ run_headless :: proc() {
 	o := &app.settings
 	open_connection()
 	if !game.init(&app.game, o.base, app.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
-	input.script_init(&app.script, u64(app.conn.slot) + 1)
+	input.script_init(&app.script, u64(app.conn.slot) + 1, sim.bot_profiles_load(o.base))
 	timer.fine_sleep_begin() // this loop sleeps between ticks
 	defer timer.fine_sleep_end()
 	debug_init(&app.debug, o, &app.camera)
@@ -167,6 +167,7 @@ ticks_owed :: proc(dt: f64) -> int {
 // them first: a click on a menu is not a shot, and a line typed is not a run.
 sample_input :: proc() {
 	mouse_taken, keys_taken := hud.input(&app.hud, &app.game, cursor())
+	if hud.leaving(&app.hud) do app.quit = true // Exit to menu, off the escape menu
 	input.sample(&app.input, render.screen_to_world(&app.camera, cursor()), app.debug.hold, !mouse_taken, !keys_taken)
 	if app.debug.has_aim do app.input.aim = app.camera.pos + app.debug.aim
 }

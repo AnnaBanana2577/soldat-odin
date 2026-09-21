@@ -11,10 +11,14 @@
 //                               others at
 //                      Act      what I chose outside the keys: my weapons, my team
 //                      Chat     a line I said, to everyone or to my team
+//                      Vote     a vote I called, or my vote for one already running
+//                      Map_Query one of the server's maps, named for the map window
 //   server -> client   Map      the map to play, and where its flags stand: on joining,
 //                               and at the start of every round
 //                      Roster   who plays in which slot, by name
 //                      Chat     a line someone said, or the server
+//                      Vote_State what vote is running, against whom or what
+//                      Map_Name the map a Map_Query asked for, and how many there are
 //                      Update   every other tick: the soldiers in my view, the bullets
 //                               born lately (each in a few updates running), the round
 //                      Things   a thing, whole, when something happened to it
@@ -32,19 +36,23 @@ package net
 
 import "../sim"
 
-VERSION      :: 11
+VERSION      :: 12
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
 CHANNEL_RELIABLE   :: 1 // news: losing one is a desync
 CHANNEL_COUNT      :: 2
 
-Msg_Kind :: enum u8 { Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts }
+Msg_Kind :: enum u8 {
+	Invalid, Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts,
+	Vote, Vote_State, Map_Query, Map_Name,
+}
 
 RELIABLE := [Msg_Kind]bool {
 	.Invalid = false, .Hello = true, .Welcome = true, .Denied = true, .Map = true, .Roster = true,
 	.Input = false, .Act = true, .Chat = true,
 	.Update = false, .Things = true, .Facts = true,
+	.Vote = true, .Vote_State = true, .Map_Query = true, .Map_Name = true,
 }
 
 MAX_CMDS_PER_INPUT   :: 32 // the unrun commands repeat in every packet: half a second of them
@@ -142,6 +150,45 @@ Chat :: struct {
 	text: Line,
 }
 
+// A vote to send a player away or to play another map. One message does both jobs, as
+// the original's votekick and votemap commands do: with no vote running it calls one,
+// and with the same vote running it is this client's vote for it (Game.pas StartVote
+// and CountVote).
+Vote_Kind :: enum u8 { Kick, Map }
+
+Vote :: struct {
+	kind:   Vote_Kind,
+	target: u8,   // the slot to send away
+	name:   Name, // or the map to play
+	reason: Line,
+}
+
+// What vote is running, to everyone: who called it, against whom or what, how far it
+// has got and how long is left. The client counts the ticks down itself.
+Vote_State :: struct {
+	kind:    Vote_Kind,
+	active:  bool,
+	target:  u8,
+	name:    Name,
+	starter: u8, // 255: the server itself
+	reason:  Line,
+	ticks:   i32,
+	votes:   u8,
+	needed:  u8,
+}
+
+// The map window browsing the server's list: a client asks for the one at `index` and
+// the server names it, with how many there are (TMsg_VoteMap and its reply).
+Map_Query :: struct {
+	index: u16,
+}
+
+Map_Name :: struct {
+	index: u16,
+	count: u16,
+	name:  Name,
+}
+
 // A soldier in an update: always the server's half, and its player's half unless it is
 // a corpse. The receiver's own carries the rest of it too (`has_rest`), because what it
 // replays its commands over must be the whole soldier and not a part of one.
@@ -208,7 +255,10 @@ Facts :: struct {
 	count:  int,
 }
 
-Message :: union { Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts }
+Message :: union {
+	Hello, Welcome, Denied, Map, Roster, Input, Act, Chat, Update, Things, Facts,
+	Vote, Vote_State, Map_Query, Map_Name,
+}
 
 message_kind :: proc(m: ^Message) -> Msg_Kind {
 	switch _ in m {
@@ -223,6 +273,10 @@ message_kind :: proc(m: ^Message) -> Msg_Kind {
 	case Update:     return .Update
 	case Things:     return .Things
 	case Facts:      return .Facts
+	case Vote:       return .Vote
+	case Vote_State: return .Vote_State
+	case Map_Query:  return .Map_Query
+	case Map_Name:   return .Map_Name
 	}
 	return .Invalid
 }
@@ -489,6 +543,31 @@ ser_act :: proc(s: ^Stream, m: ^Act) {
 	ser_enum(s, &m.team)
 }
 
+ser_vote :: proc(s: ^Stream, m: ^Vote) {
+	ser_enum(s, &m.kind)
+	ser_u8(s, &m.target)
+	ser_text(s, &m.name)
+	ser_text(s, &m.reason)
+}
+
+ser_vote_state :: proc(s: ^Stream, m: ^Vote_State) {
+	ser_enum(s, &m.kind)
+	ser_bool(s, &m.active)
+	ser_u8(s, &m.target)
+	ser_text(s, &m.name)
+	ser_u8(s, &m.starter)
+	ser_text(s, &m.reason)
+	ser_as(s, &m.ticks, i32)
+	ser_u8(s, &m.votes)
+	ser_u8(s, &m.needed)
+}
+
+ser_map_name :: proc(s: ^Stream, m: ^Map_Name) {
+	ser_u16(s, &m.index)
+	ser_u16(s, &m.count)
+	ser_text(s, &m.name)
+}
+
 ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_u32(s, &m.tick)
 	ser_u32(s, &m.ack)
@@ -565,6 +644,10 @@ decode :: proc(data: []u8, msg: ^Message) -> bool {
 	case .Update:     msg^ = Update{}
 	case .Things:     msg^ = Things{}
 	case .Facts:      msg^ = Facts{}
+	case .Vote:       msg^ = Vote{}
+	case .Vote_State: msg^ = Vote_State{}
+	case .Map_Query:  msg^ = Map_Query{}
+	case .Map_Name:   msg^ = Map_Name{}
 	}
 	ser_message(&s, msg)
 	return stream_finish(&s)
@@ -584,5 +667,9 @@ ser_message :: proc(s: ^Stream, msg: ^Message) {
 	case Update:     ser_update(s, &m)
 	case Things:     ser_things(s, &m)
 	case Facts:      ser_facts(s, &m)
+	case Vote:       ser_vote(s, &m)
+	case Vote_State: ser_vote_state(s, &m)
+	case Map_Query:  ser_u16(s, &m.index)
+	case Map_Name:   ser_map_name(s, &m)
 	}
 }

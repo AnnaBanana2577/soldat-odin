@@ -101,7 +101,7 @@ scoreboard_draw :: proc(h: ^Hud, g: ^game.Game, sc: Screen) {
 	}
 }
 
-@(private = "file")
+@(private)
 team_color :: proc(team: sim.Team) -> rl.Color {
 	#partial switch team {
 	case .Alpha: return {255, 0, 0, 255}
@@ -112,7 +112,7 @@ team_color :: proc(team: sim.Team) -> rl.Color {
 
 // The shirts' colours, which the original takes from each player's profile: fixed by team
 // until the roster carries them (as the gostek's are).
-@(private = "file")
+@(private)
 shirt_color :: proc(team: sim.Team) -> rl.Color {
 	#partial switch team {
 	case .Alpha: return {235, 90, 85, 255}

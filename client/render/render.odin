@@ -17,6 +17,7 @@ Render :: struct {
 	map_texture: rl.Texture2D,   // id 0 draws the polygons untextured
 	scenery:     []rl.Texture2D, // one per entry in Level.scenery, id 0 where it failed to load
 	meshes:      Map_Meshes,
+	minimap:     Minimap,
 	gostek:      Gostek,
 	bullet_art:  Bullet_Art,
 	things_art:  Things_Art,
@@ -50,6 +51,7 @@ map_sync :: proc(r: ^Render, g: ^game.Game) {
 	r.map_texture = map_texture_load(r.base, g.level.texture)
 	r.scenery = scenery_load(r.base, g.level.scenery)
 	map_meshes_build(&r.meshes, &g.level, r.map_texture)
+	minimap_build(&r.minimap, &g.level, &r.meshes)
 	for &spark in r.sparks.pool do spark = {}
 	r.map_loads = g.maps_loaded
 }
@@ -58,6 +60,7 @@ map_sync :: proc(r: ^Render, g: ^game.Game) {
 map_unload :: proc(r: ^Render) {
 	if r.map_loads == 0 do return
 	map_meshes_unload(&r.meshes)
+	minimap_unload(&r.minimap)
 	for t in r.scenery do if t.id != 0 do rl.UnloadTexture(t)
 	delete(r.scenery)
 	if r.map_texture.id != 0 do rl.UnloadTexture(r.map_texture)

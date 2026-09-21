@@ -26,20 +26,23 @@ Hud :: struct {
 	feed:   Kill_Feed,
 	menu:   Weapons_Menu,
 	team:   Team_Menu,
+	menus:  Menus, // the escape menu and the vote windows
 	chat:   Chat,
 	big:    Big_Message,
 	was_dead, was_ended: bool,
 	team_was: sim.Team, // my soldier's team a tick ago: a change is the server moving me
 	scores_shown: bool, // F1
+	minimap_shown: bool, // F3; off until it is asked for, as in the original
 }
 
-Art :: enum { Health, Health_Bar, Vest_Bar, Ammo, Ammo_Bar, Fire_Bar, Fire_Bar_Back, Jet, Jet_Bar, Nade, Cluster_Nade, Back, Flag, No_Flag, Cursor, Menu_Cursor }
+Art :: enum { Health, Health_Bar, Vest_Bar, Ammo, Ammo_Bar, Fire_Bar, Fire_Bar_Back, Jet, Jet_Bar, Nade, Cluster_Nade, Back, Flag, No_Flag, Cursor, Menu_Cursor, Small_Dot }
 
 ART_FILES := [Art]string {
 	.Health = "health.png", .Health_Bar = "health-bar.png", .Vest_Bar = "vest-bar.png",
 	.Ammo = "ammo.png", .Ammo_Bar = "reload-bar.png", .Fire_Bar = "fire-bar.png", .Fire_Bar_Back = "fire-bar-r.png",
 	.Jet = "jet.png", .Jet_Bar = "jet-bar.png", .Nade = "nade.png", .Cluster_Nade = "cluster-nade.png",
 	.Back = "back.png", .Flag = "flag.png", .No_Flag = "noflag.png", .Cursor = "cursor.png", .Menu_Cursor = "menucursor.png",
+	.Small_Dot = "smalldot.png",
 }
 
 GUN_FILES := #partial [sim.Weapon_Id]string {
@@ -96,6 +99,7 @@ init :: proc(h: ^Hud, base: string) {
 		}
 	}
 	menu_init(&h.menu)
+	rl.SetExitKey(.KEY_NULL) // Escape opens the menu; the game is left from there
 	rl.HideCursor() // the crosshair is drawn
 }
 
@@ -133,12 +137,22 @@ font_find :: proc(base: string) -> string {
 // what of the keys and the mouse the HUD took this frame, which the game does not hear.
 input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken, keys_taken: bool) {
 	if chat_input(&h.chat, g) do return false, true
+	if vote_input(h, g) do return false, false
+	mouse_taken = menus_input(h, g, cursor)
+	if menus_open(h) do return mouse_taken, false // the soldier still hears its own keys
 	if rl.IsKeyPressed(.F1) do h.scores_shown = !h.scores_shown
+	if rl.IsKeyPressed(.F3) do h.minimap_shown = !h.minimap_shown
 	if rl.IsKeyPressed(.TAB) do h.team.open = false // the weapons menu's key: one menu at a time
 	// the weapons menu first: a team picked opens it, and this frame's keys are the team menu's
-	mouse_taken = menu_input(&h.menu, g, cursor)
+	mouse_taken = menu_input(&h.menu, g, cursor) || mouse_taken
 	mouse_taken = team_menu_input(h, g, cursor) || mouse_taken
 	return mouse_taken, false
+}
+
+// Whether Exit to menu was pressed on the escape menu: the game closes, there being
+// no menu here to go back to.
+leaving :: proc(h: ^Hud) -> bool {
+	return h.menus.leaving
 }
 
 // ---- the tick ----
@@ -180,7 +194,7 @@ tick :: proc(h: ^Hud, g: ^game.Game) {
 // scoreboard, the messages, the cursor last. `cursor` is the mouse in pixels; the
 // camera and `alpha` place a line said over its speaker's head. The scoreboard covers
 // the top of the screen, so the feed and my ping make way for it.
-draw :: proc(h: ^Hud, g: ^game.Game, camera: ^render.Camera, cursor: sim.Vec2, alpha: f32) {
+draw :: proc(h: ^Hud, g: ^game.Game, r: ^render.Render, camera: ^render.Camera, cursor: sim.Vec2, alpha: f32) {
 	sc := screen()
 	mine := &g.world.soldiers[g.me]
 	alive := mine.active && !mine.dead
@@ -188,6 +202,7 @@ draw :: proc(h: ^Hud, g: ^game.Game, camera: ^render.Camera, cursor: sim.Vec2, a
 	ended := g.world.round.state == .Ended
 	scores := h.scores_shown || ended
 	draw_status(h, g, sc, mine)
+	minimap_draw(h, g, sc, r, camera)
 	if !scores {
 		feed_draw(h, g, sc)
 		text(h, sc, .Small, fmt.tprintf("%d ms", g.my_lag * 1000 / sim.TICK_RATE), spread(sc, 600), 18, {200, 200, 200, 200})
@@ -195,11 +210,17 @@ draw :: proc(h: ^Hud, g: ^game.Game, camera: ^render.Camera, cursor: sim.Vec2, a
 	chat_draw(h, g, sc, camera, alpha)
 	if h.menu.open do menu_draw(h, g, sc)
 	if h.team.open do team_menu_draw(h, g, sc)
+	menus_draw(h, g, sc)
+	vote_draw(h, g, sc)
+	vote_reason_draw(h, sc)
 	if mine.active && mine.dead do draw_respawn(h, sc, mine)
+	names_draw(h, g, sc, camera, alpha)
+	if alive do cease_fire_draw(h, g, sc, camera, alpha)
 	if scores do scoreboard_draw(h, g, sc)
 	if !ended do big_draw(h, sc)
 
-	over_menu := (h.menu.open && menu_covers(sc, cursor)) || (h.team.open && team_menu_covers(sc, cursor))
+	over_menu := (h.menu.open && menu_covers(sc, cursor)) || (h.team.open && team_menu_covers(sc, cursor)) ||
+		menus_covers(h, sc, cursor)
 	if over_menu {
 		draw_art(h.art[.Menu_Cursor], sc, cursor.x / sc.scale, cursor.y / sc.scale, ART_SCALE, rl.WHITE)
 	} else if alive {
@@ -371,4 +392,22 @@ text :: proc(h: ^Hud, sc: Screen, font: Font, line: string, x, y: f32, color: rl
 text_width :: proc(h: ^Hud, sc: Screen, font: Font, line: string) -> f32 {
 	c := strings.clone_to_cstring(line, context.temp_allocator)
 	return rl.MeasureTextEx(h.fonts[font], c, FONT_UNITS[font] * sc.scale, 0).x / sc.scale
+}
+
+// A menu opened by name, for a capture of it (dbg_menu). Nothing in the game calls it.
+open_menu :: proc(h: ^Hud, g: ^game.Game, which: string) {
+	switch which {
+	case "esc":     menus_show_esc(h)
+	case "kick":
+		menus_show_esc(h)
+		h.menus.esc, h.menus.kick = false, true
+		h.menus.slot = g.me
+	case "map":
+		menus_show_esc(h)
+		h.menus.esc, h.menus.maps = false, true
+		game.ask_map(g, 0)
+	case "team":    h.team.open = true
+	case "weapons": menu_open(&h.menu, by_hand = true)
+	case "scores":  h.scores_shown = true
+	}
 }

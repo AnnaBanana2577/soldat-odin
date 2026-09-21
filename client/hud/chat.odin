@@ -14,6 +14,8 @@ import "../../shared/sim"
 Chat :: struct {
 	typing:  bool,
 	team:    bool,
+	reason:  bool, // what is being typed is the reason for a kick, not a line to say
+	kick_slot: u8, // and who it is against
 	line:    [net.MAX_CHAT]u8,
 	len:     int,
 	started: f64, // when typing began: the cursor blinks from then
@@ -53,20 +55,26 @@ chat_input :: proc(c: ^Chat, g: ^game.Game) -> (keys_taken: bool) {
 	if !c.typing {
 		all, team := rl.IsKeyPressed(.T), rl.IsKeyPressed(.Y)
 		if !all && !team do return false
-		c.typing, c.team, c.len, c.started = true, team, 0, rl.GetTime()
+		c.typing, c.team, c.len, c.started, c.reason = true, team, 0, rl.GetTime(), false
 		for rl.GetCharPressed() != 0 {} // the T or Y that opened it
 		rl.SetExitKey(.KEY_NULL)          // Esc lets go of the line, not of the game
 		return true
 	}
+	longest := c.reason ? REASON_LONGEST : len(c.line)
 	for ch := rl.GetCharPressed(); ch != 0; ch = rl.GetCharPressed() {
-		if ch >= ' ' && ch <= '~' && c.len < len(c.line) {
+		if ch >= ' ' && ch <= '~' && c.len < longest {
 			c.line[c.len] = u8(ch)
 			c.len += 1
 		}
 	}
 	if (rl.IsKeyPressed(.BACKSPACE) || rl.IsKeyPressedRepeat(.BACKSPACE)) && c.len > 0 do c.len -= 1
 	if rl.IsKeyPressed(.ENTER) || rl.IsKeyPressed(.KP_ENTER) {
-		if c.len > 0 do game.say(g, string(c.line[:c.len]), c.team)
+		if c.reason {
+			// a reason of a few letters at least, as the original asks for
+			if c.len > 3 do game.call_kick(g, c.kick_slot, string(c.line[:c.len]))
+		} else if c.len > 0 {
+			game.say(g, string(c.line[:c.len]), c.team)
+		}
 		chat_close(c)
 	} else if rl.IsKeyPressed(.ESCAPE) {
 		chat_close(c)
@@ -75,8 +83,14 @@ chat_input :: proc(c: ^Chat, g: ^game.Game) -> (keys_taken: bool) {
 }
 
 chat_close :: proc(c: ^Chat) {
-	c.typing = false
-	rl.SetExitKey(.ESCAPE)
+	c.typing, c.reason = false, false
+}
+
+// The kick window asks for a reason: what is typed now sends the vote (GameMenus.pas
+// sets VoteKickReasonType).
+chat_ask_reason :: proc(c: ^Chat, slot: u8) {
+	c.typing, c.team, c.len, c.started = true, false, 0, rl.GetTime()
+	c.reason, c.kick_slot = true, slot
 }
 
 // ---- hearing ----

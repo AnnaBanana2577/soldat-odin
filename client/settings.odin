@@ -35,6 +35,8 @@ Settings :: struct {
 	aim:        string, // "x,y": the cursor held at this offset from our soldier
 	seconds:    f32,    // quit after this long with a line of counts
 	screenshot: string, // and write the frame to this file
+	menu:       string, // a menu opened at the start, to capture it
+	vote:       string, // a vote called a second in
 	config:     string,
 	list_cvars: bool,
 }
@@ -71,6 +73,8 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "dbg_aim", &s.aim, "x,y: the cursor held at this offset from our soldier")
 	cvar.add(c, "dbg_seconds", &s.seconds, "quit after this long with a line of counts")
 	cvar.add(c, "dbg_screenshot", &s.screenshot, "and write the frame to this file")
+	cvar.add(c, "dbg_menu", &s.menu, "a menu opened at the start: esc, kick, map, team, weapons or scores")
+	cvar.add(c, "dbg_vote", &s.vote, "a vote called a second in: kick SLOT REASON, or map NAME")
 	cvar.add(c, "cl_config", &s.config, "the settings file read at startup")
 	cvar.add(c, "cvars", &s.list_cvars, "print every setting and what it is set to, and stop")
 }

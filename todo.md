@@ -1,7 +1,7 @@
 # To do
 
 What is left. The readme says how the netcode works (five rules, at the top) and what it
-measured; this says what it does not do yet. Checked against the code on 2026-09-20.
+measured; this says what it does not do yet. Checked against the code on 2026-09-21.
 
 ## Netcode
 
@@ -38,23 +38,20 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
 
 ## Game
 
-- Game modes. There are none: a round scores captures and ends at the score or time
-  limit. Deathmatch, Team Deathmatch, Pointmatch, Rambo, Hold the Flag and Infiltration
-  are all missing, and with them Charlie and Delta, spectators, and the maps' own
-  families (dm_, ctf_, inf_, htf_).
-- Bots cannot navigate: the brain (shared/sim/bot.odin) runs at the nearest enemy, jets
-  when it is above and jumps when stuck. The maps' waypoints are parsed and thrown away
-  (shared/sim/level.odin); the original's waypoint AI would use them, and then bots
-  could carry a flag.
-- Lobby and console: no console, no commands, no map voting, no muting, no teams beyond
-  Alpha and Bravo. A setting can only be given at startup (config.cfg or the command
-  line), not changed while playing.
-- Keys are hardwired (client/input/input.odin), and so are the player's colours; the
-  roster carries names only. Both belong in the settings and the roster.
-- HUD gaps: the weapon stats page (F2), the minimap, the name of the player under the
-  cursor, the bonus's name and time, the sniper line, and the crosshair growing with the
-  bink. The scoreboard shows the map's name where a server's would go, and the next
-  map's name is not known until it loads.
+- One game mode. Capture the flag is in and plays: flags, captures, scores, a round
+  that ends on the score or the clock. It is the only one. Deathmatch, Team Deathmatch,
+  Pointmatch, Rambo, Hold the Flag and Infiltration are all missing, and with them
+  Charlie and Delta, spectators, a setting to pick a mode, and the maps' own families
+  (dm_, htf_, inf_).
+- The bots are the original's (AI.pas, in shared/sim/bot*.odin), but what their files
+  say about how they look (shirt, trousers, hair, headgear) is read and dropped,
+  since the roster carries names only. Their paths for the modes this game does not
+  have are left out, nothing sends one to a stationary gun, and their aim at a target
+  on a stationary gun is the plain one.
+- Lobby and console: no console and no commands (a map vote and a kick vote are in,
+  off the escape menu), no muting, no teams beyond Alpha and Bravo, and no spectators.
+  A setting can only be given at startup (config.cfg or the command line), not changed
+  while playing.
 - The weapons menu offers every weapon; a server's list of allowed ones is not in.
 - Sounds missing: the corpse's thud, shell casings, the antics. Shell casings are not
   drawn either.
@@ -64,6 +61,42 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
   becoming a knife to pick up (dropped_gun.odin); corpses as targets for bullets
   (bullet_collision.odin); the flag carrier check on hurting polygons
   (soldier_collision.odin).
+
+## HUD
+
+What the original draws over the game and this does not. The layout, the menus and the
+scoreboard are ported from InterfaceGraphics.pas and GameMenus.pas, and the readme says
+what is in; this is the rest of it.
+
+- The weapon stats page (F2): the weapon in hand attribute by attribute against its
+  default, as RenderWeaponStatsTexts and GetWeaponAttribs give it.
+- Keys are hardwired (client/input/input.odin) and are not the original's, which binds
+  them from its own config (configs/controls.cfg): it jets on the middle mouse button,
+  throws the flag with Space, opens the radio on V and the command line on /, takes a
+  screenshot on F4, and puts the weapon stats on F2 and the minimap on F3. Binds belong
+  in the settings, with those as the defaults.
+- Spectators: no entry on the team menu, no section on the scoreboard, no free camera,
+  and nothing on the server that lets a player sit a round out.
+- The radio menu (V): the three keys, the lines they say, and the heads they say them
+  over.
+- The sniper line, the bonus's name and how long is left of it, and the crosshair
+  growing with the bink.
+- The scoreboard has no spectators, does not scroll (PageUp and PageDown), and shows
+  the map's name where a server's name would go; nobody knows the next map until it
+  loads.
+- The console and the kill feed each draw in one colour. The original colours a line by
+  what it is (a join, a vote, a death, the server speaking) and keeps the server's
+  messages apart from the kills.
+- The names of the players and their colours: the roster carries names only, so the
+  shirts on the scoreboard, the kill feed and the gostek are the team's colours and not
+  each player's own.
+- The whole interface is fixed in code. The original reads an interface-gfx archive
+  with its own .ini: where every bar, icon and number sits, what colour it is and which
+  image draws it, so a player can change the look of the lot.
+- Exit to menu, off the escape menu, closes the game: there is no main menu here to
+  return to, and no server browser to return to it from.
+- The cease fire count over one's own head is drawn whenever the spawn protection is
+  on; the original draws it in survival mode alone, which this game has not got.
 
 ## Tests and tools
 

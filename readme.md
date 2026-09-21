@@ -113,6 +113,7 @@ server, so its settings work here; anything after a second -- goes to the client
 odin run build.odin -file -- dev -- -cl_window           in a window, not borderless fullscreen
 odin run build.odin -file -- dev -- -r_wire -r_zoom 0.3  the polygons as lines, the view closer
 odin run build.odin -file -- dev -- -dbg_hold right,fire -dbg_aim 200,0 -dbg_screenshot out.png
+odin run build.odin -file -- dev -- -dbg_menu esc -dbg_screenshot esc.png
 odin run build.odin -file -- dev -sv_bots 2 -- -net_ping 120 -net_jitter 30 -net_loss 5
 odin run build.odin -file -- dev -sv_bots 4 -sv_map ctf_Ash,Arena -sv_timelimit 2 -sv_scorelimit 3
 ```
@@ -125,15 +126,17 @@ a simulated bad line between that client and the server: a round trip of 120 ms,
 30 ms more at random, one packet in twenty lost (shared/net/fakelink.odin; a lost
 reliable packet is resent a round trip and a half later, and those behind it wait). The
 last plays ctf_Ash and Arena in turn, a round each, a round ending at two minutes or
-three captures (the defaults are fifteen and ten); sv_bots_dodge makes the bots change
-direction and jet at random in a fight, as a person does, and sv_base or SOLDAT_BASE
-plays another set of maps and art.
+three captures (the defaults are fifteen and ten); sv_bots_difficulty sets how well the
+bots aim (300 stupid, 100 normal, 10 impossible) and sv_bots_chat whether they talk, and
+sv_base or SOLDAT_BASE plays another set of maps and art.
 
 Keys: A and D run, W jumps, S crouches, X goes prone, Space jets, Q changes weapon,
 R reloads, F throws the gun, K is suicide, the mouse aims and fires. F1 shows the
-scoreboard. Tab opens and closes the weapons menu; in it a click or 1 to 0 picks a
-primary, a click a secondary. M opens the team menu. T says something to everyone and
-Y to your team; Enter sends it, Esc lets it go.
+scoreboard and F3 the minimap. Tab opens and closes the weapons menu; in it a click or
+1 to 0 picks a primary, a click a secondary. M opens the team menu. T says something to
+everyone and Y to your team; Enter sends it, Esc lets it go. Esc opens the game's menu:
+1 leaves, 2 and 3 open the windows for voting in a map or voting a player out, 4 picks
+a team. While a vote is running, F12 agrees with it and F11 has none of it.
 
 ## What works
 
@@ -275,10 +278,18 @@ Y to your team; Enter sends it, Esc lets it go.
   the tick before; bullets whistle and whiz past us. Four reserved voices per soldier
   keep the loops alive and let a wind-up be cut. Corpse thuds, shell casings and the
   antics are not in yet.
-- Bots: the server plays them itself, with no client and no connection: each tick a
-  small brain (shared/sim/bot.odin) reads the server's world and gives the bot's
-  command (run at the nearest enemy, jet when it is above, jump when stuck, fire with
-  line of sight in range). The server's sv_bots adds them, sv_bots_dodge makes them dodge.
+- Bots: OpenSoldat's own, AI.pas ported whole (shared/sim/bot.odin, bot_path.odin,
+  bot_fight.odin). The server plays them itself, with no client and no connection: each
+  tick a bot fills in the keys a player would hold and the sim steps its soldier on them
+  like anyone else's. With nobody in sight it walks the waypoints the map author laid,
+  waiting where they say to wait and fetching a flag or a kit it sees; with someone in
+  sight it fights by how far off they are on each axis, leading its aim by their speed
+  and the drop of the bullet, throwing grenades, charging with a knife, backing off from
+  a flame god, and running the flag home rather than fighting for it. Whoever wounds it
+  is hunted wherever they go. Its name, its look, its favourite weapon, how well it
+  aims, how much it camps and what it says come from the original's personality files
+  (assets/bots/*.bot). sv_bots adds them, sv_bots_difficulty scales their aim, and
+  sv_bots_chat lets them talk.
 - Tests without a person: the client's cl_headless has no window and is played by the
   bots' brain, through a real connection, and with dbg_seconds it quits with a summary:
   the hits it saw itself give and take, how far behind it showed the world, and what
@@ -286,6 +297,18 @@ Y to your team; Enter sends it, Esc lets it go.
   and how far back that client's shots were judged: the two agreeing is the measure
   of the netcode. A simulated bad line (net_ping, net_jitter, net_loss) sits on any client.
   The test command runs the wire format's tests.
+- The menus Escape opens (GameMenus.pas): the escape menu, and from it the map and
+  kick windows that call a vote. A vote runs for twenty seconds and passes as soon as
+  sv_votepercent of the players who can vote have agreed (the bots neither vote nor
+  count); the map window browses the server's own list, and a kick asks for a reason
+  before it goes. The box in the corner says what is being voted on, who called it and
+  why (server/vote.odin, client/hud/menus.odin).
+- The minimap (F3): the map's polygons drawn into a texture when it loads, with a dot
+  for each of my team, for me, for a flag carrier and for the flags at home, and a box
+  around what the screen shows.
+- The names of my team mates while they are off the screen, held against the edge they
+  went out by and fading with the distance, and the count of the spawn protection over
+  my own soldier.
 - The scoreboard (the original's frags menu), toggled with F1 and shown at every round's
   end with who won and the countdown to the next: the map and the time left, and each
   team's players under its caption and total, the best first, with kills, flags,

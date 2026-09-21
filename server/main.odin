@@ -54,12 +54,15 @@ init :: proc() {
 		kits_collide  = s.kits_collide,
 		max_rewind    = u32(s.max_rewind * sim.TICK_RATE / 1000),
 		update_others = u32(max(s.update_others, 1)),
+		bots_difficulty = s.bots_difficulty,
+		bots_chat     = s.bots_chat,
+		vote_percent  = s.vote_percent,
 	}
 	if !game_init(&server.game, s.base, rules) {
 		fmt.eprintfln("could not load %s from %s", maps[0], s.base)
 		os.exit(1)
 	}
-	for _ in 0 ..< s.bots do add_bot(&server.game, s.bots_dodge)
+	for _ in 0 ..< s.bots do add_bot(&server.game)
 	server.last = time.tick_now()
 }
 

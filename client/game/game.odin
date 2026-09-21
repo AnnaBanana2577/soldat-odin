@@ -44,11 +44,15 @@ Game :: struct {
 	lags:      [sim.MAX_PLAYERS]u8, // how late the server finds each player sees the world, in ticks
 	events:    sim.Events, // this tick's, for the sparks and the sounds
 	heard:     [dynamic]net.Chat, // this tick's lines, for the HUD
+	vote:      net.Vote_State, // what is being voted on, from the server; its clock runs here
+	map_list:  net.Map_Name,   // the map the map window is showing, of how many
 	primary, secondary: sim.Weapon_Id, // the weapons I chose, for my next spawn
 
 	pending:   [dynamic]sim.Command, // mine the server has not said it ran: what I replay
 	seq:       u32,                  // my commands are numbered from here
 	acts:      [dynamic]net.Act,     // what I chose, to tell once
+	called:    [dynamic]net.Vote,    // the votes I called or agreed to, to tell once
+	asked:     [dynamic]net.Map_Query, // and the maps I asked the name of
 	said:      [dynamic]net.Chat,    // what I said, to tell once
 	seen_shot: [sim.MAX_PLAYERS]u32, // the newest of each shooter's bullets flown here
 	newest:    u32, // the newest update taken: one that comes after a newer one is dropped
@@ -106,6 +110,8 @@ destroy :: proc(g: ^Game) {
 	free(g.skeletons)
 	delete(g.pending)
 	delete(g.acts)
+	delete(g.called)
+	delete(g.asked)
 	delete(g.said)
 	delete(g.heard)
 	free(g.incoming)
@@ -115,6 +121,7 @@ tick :: proc(g: ^Game, conn: ^connection.Connection, in_: ^input.Input) {
 	sim.events_clear(&g.events)
 	clear(&g.heard)
 	view_advance(&g.view, &g.ctx, &g.world, g.me)
+	if g.vote.active && g.vote.ticks > 0 do g.vote.ticks -= 1 // the server says when it is over
 	receive(g, conn)
 	step_mine(g, in_)
 	step_world(g)
@@ -142,6 +149,10 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 			for i in 0 ..< m.count do g.world.things[m.indices[i]] = m.things[i]
 		case net.Facts:
 			for i in 0 ..< m.count do receive_fact(g, m.events[i])
+		case net.Vote_State:
+			g.vote = m
+		case net.Map_Name:
+			g.map_list = m
 		}
 	}
 }
@@ -269,7 +280,40 @@ say :: proc(g: ^Game, line: string, team: bool) {
 	append(&g.said, chat)
 }
 
-name_of :: proc(g: ^Game, slot: u8) -> string {
+// A vote to send a player away, to be called or agreed to (server/vote.odin decides
+// which: the same vote sent while one is running is a vote for it).
+call_kick :: proc(g: ^Game, slot: u8, reason: string) {
+	v := net.Vote{kind = .Kick, target = slot}
+	net.text_set(&v.reason, reason)
+	append(&g.called, v)
+}
+
+// And one to play another map.
+call_map :: proc(g: ^Game, map_name: string) {
+	v := net.Vote{kind = .Map, name = net.name_make(map_name)}
+	append(&g.called, v)
+}
+
+// My vote for whatever is running.
+vote_yes :: proc(g: ^Game) {
+	if !g.vote.active do return
+	append(&g.called, net.Vote{kind = g.vote.kind, target = g.vote.target, name = g.vote.name})
+	g.vote.active = false // it is out of my hands now, and off my screen
+}
+
+// I want nothing to do with it: it goes off my screen and the others vote on.
+vote_no :: proc(g: ^Game) {
+	g.vote.active = false
+}
+
+// The name of the server's map at `index`, for the map window, which comes back as
+// map_list.
+ask_map :: proc(g: ^Game, index: int) {
+	append(&g.asked, net.Map_Query{index = u16(max(index, 0))})
+}
+
+name_of :: proc
+(g: ^Game, slot: u8) -> string {
 	return net.text_string(&g.names[slot])
 }
 
@@ -338,6 +382,10 @@ send :: proc(g: ^Game, conn: ^connection.Connection) {
 	connection.send_message(conn, m)
 
 	for a in g.acts do connection.send_message(conn, a)
+	for v in g.called do connection.send_message(conn, v)
+	for q in g.asked do connection.send_message(conn, q)
+	clear(&g.called)
+	clear(&g.asked)
 	for c in g.said do connection.send_message(conn, c)
 	clear(&g.said)
 	clear(&g.acts)

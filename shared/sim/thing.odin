@@ -42,7 +42,7 @@ Thing :: struct {
 	forces:        [4]Vec2,
 	collide_count: [4]u8, // touches per point, for the landing sounds
 	in_base:       bool,  // a flag at home
-	interest:      i32,   // a stationary gun's heat
+	interest:      i32,   // how long the bots still go for it: a flag holds theirs for 25 seconds
 	respawn_wait:  i32,   // a taken kit's way back
 	respawn_style: Thing_Style,
 }
@@ -128,6 +128,8 @@ thing_place :: proc(ctx: ^Context, t: ^Thing, style: Thing_Style, pos: Vec2, wea
 	t.old_pos = t.pos
 	t.in_base = is_flag(style)
 	t.timeout = FLAG_TIMEOUT
+	// everything but a gun is worth fetching, for a while (AI.pas reads Thing.interest)
+	if style != .Weapon && style != .Stat_Gun do t.interest = FLAG_INTEREST_TIME
 }
 
 thing_create :: proc(ctx: ^Context, w: ^World, style: Thing_Style, pos: Vec2, weapon: Weapon_Id = .None) -> (index: int, ok: bool) {

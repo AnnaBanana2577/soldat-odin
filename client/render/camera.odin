@@ -61,3 +61,10 @@ rl_camera :: proc(c: ^Camera) -> rl.Camera2D {
 	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
 	return {offset = {w / 2, h / 2}, target = {c.pos.x, c.pos.y}, zoom = h / (GAME_HEIGHT * c.zoom)}
 }
+
+// Half of what the screen shows, in world units: the minimap's box.
+view_half :: proc(c: ^Camera) -> sim.Vec2 {
+	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
+	view_h := GAME_HEIGHT * c.zoom
+	return {view_h * w / h / 2, view_h / 2}
+}
