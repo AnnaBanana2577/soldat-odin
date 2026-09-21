@@ -270,15 +270,30 @@ draw_status :: proc(h: ^Hud, g: ^game.Game, sc: Screen, mine: ^sim.Soldier) {
 	has_flags := false
 	for &t in w.things do if sim.is_flag(t.style) do has_flags = true
 	if has_flags {
-		draw_panel(h, sc, x, 330, 57, 88)
+		draw_panel(h, sc, x, 330, 57, 88, 143) // Int.Alpha * 0.56 in the original
+
+		// A flag shows only while it is away from its base, and always as noflag.png:
+		// the box warns that a flag is out, it is not a pair of indicators. The two sit
+		// side by side across the top of it (the CTF branch of the original's team box).
 		for &t in w.things {
-			if !sim.is_flag(t.style) do continue
-			team := sim.flag_team(t.style)
-			row: f32 = team == .Alpha ? 335 : 375
-			tint := team == .Alpha ? rl.Color{255, 80, 70, 255} : rl.Color{80, 120, 255, 255}
-			draw_art(h.art[t.in_base ? .Flag : .No_Flag], sc, x + 4, row, ART_SCALE, tint)
-			text(h, sc, .Menu, fmt.tprint(w.round.scores[team]), x + 50, row + 18, tint, .Right)
+			if !sim.is_flag(t.style) || t.in_base do continue
+			alpha_team := sim.flag_team(t.style) == .Alpha
+			tint := alpha_team ? rl.Color{255, 0, 0, 255} : rl.Color{0, 0, 255, 255}
+			draw_art(h.art[.No_Flag], sc, x + (alpha_team ? 4 : 35), 335, ART_SCALE, tint)
 		}
+
+		// The scores below them, the leading team's on top, each in its own colour: the
+		// original sorts SortedTeamScore by score and the colour travels with the team.
+		Team_Row :: struct {
+			score: i32,
+			tint:  rl.Color,
+		}
+		rows := [2]Team_Row{
+			{w.round.scores[.Alpha], {210, 15, 5, 255}},
+			{w.round.scores[.Bravo], {5, 15, 210, 255}},
+		}
+		if rows[1].score > rows[0].score do rows[0], rows[1] = rows[1], rows[0]
+		for r, i in rows do text(h, sc, .Menu, fmt.tprint(r.score), x + 2, 355 + f32(i) * 40, r.tint)
 	}
 
 	if mine.active {
@@ -361,10 +376,10 @@ draw_bar :: proc(t: rl.Texture2D, sc: Screen, x, y: f32, part: f32, from_right :
 
 // The translucent panel behind the menus and boxes: back.png stretched.
 @(private)
-draw_panel :: proc(h: ^Hud, sc: Screen, x, y, w, height: f32) {
+draw_panel :: proc(h: ^Hud, sc: Screen, x, y, w, height: f32, alpha: u8 = 112) {
 	t := h.art[.Back]
 	if t.id == 0 do return
-	rl.DrawTexturePro(t, {0, 0, f32(t.width), f32(t.height)}, {x * sc.scale, y * sc.scale, w * sc.scale, height * sc.scale}, {}, 0, {255, 255, 255, 112})
+	rl.DrawTexturePro(t, {0, 0, f32(t.width), f32(t.height)}, {x * sc.scale, y * sc.scale, w * sc.scale, height * sc.scale}, {}, 0, {255, 255, 255, alpha})
 }
 
 Align :: enum { Left, Right, Center }
