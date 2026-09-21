@@ -14,6 +14,13 @@ package editor
 // leftovers - which is why it is downstream of the codec and never the other way round.
 //
 //	client -cl_editor [-cl_base DIR] [-cl_map NAME]
+//
+//   toolbar.odin   the strip on top: open, save, and what to draw
+//   layout.odin    where the panes sit, and the splitters between them
+//   panels.odin    the map list and the inspector
+//   overlays.odin  spawns, colliders and bot paths, over the map
+//   newmap.odin    making a map and writing one back
+//   theme.odin     the dark raygui palette
 
 import "core:c"
 import "core:fmt"
@@ -27,10 +34,17 @@ import "../../shared/pms"
 import "../../shared/sim"
 
 WHEEL_ZOOM :: 1.15
+NAME_MAX :: 64
 
 Detail :: struct {
 	label: string,
 	value: string, // owned
+}
+
+// The one modal the editor has.
+Dialog :: enum {
+	None,
+	New,
 }
 
 Editor :: struct {
@@ -42,15 +56,19 @@ Editor :: struct {
 
 	// The truth, and the picture derived from it.
 	open:   pms.Map,
+	file:   string, // what it is called on disk, owned
 	level:  sim.Level,
 	view:   render.Map_View,
 	loaded: bool,
 
-	camera:    render.Camera,
-	layout:    Layout,
-	drag:      Splitter,
-	panning:   bool,
-	wireframe: bool,
+	camera:  render.Camera,
+	layout:  Layout,
+	drag:    Splitter,
+	panning: bool,
+	show:    Layers,
+
+	dialog:   Dialog,
+	name_buf: [NAME_MAX]u8, // the new map's name, as raygui edits it
 
 	status:  string, // owned
 	details: [dynamic]Detail,
@@ -63,19 +81,16 @@ run :: proc(base: string, first_map: string) {
 		base   = base,
 		active = -1,
 		layout = layout_default(),
+		show   = DEFAULT_LAYERS,
 		status = strings.clone("pick a map"),
 	}
 	defer editor_destroy(&e)
 
-	names, ok := list_maps(base)
-	if !ok || len(names) == 0 {
+	reload_names(&e)
+	if len(e.names) == 0 {
 		fmt.eprintfln("no maps in %s/maps", base)
 		return
 	}
-	e.names = names
-	joined := strings.join(names, ";")
-	defer delete(joined)
-	e.items = strings.clone_to_cstring(joined)
 
 	e.camera.zoom = 1
 	theme_apply()
@@ -101,6 +116,21 @@ editor_destroy :: proc(e: ^Editor) {
 }
 
 // ---- the map ----
+
+// The .pms files on disk, and the joined copy raygui's list wants. Called again when a
+// map is created, so the new one appears without a restart.
+@(private)
+reload_names :: proc(e: ^Editor) {
+	for name in e.names do delete(name)
+	delete(e.names)
+	delete(e.items)
+
+	names, _ := list_maps(e.base)
+	e.names = names
+	joined := strings.join(names, ";")
+	defer delete(joined)
+	e.items = strings.clone_to_cstring(joined)
+}
 
 @(private)
 open_named :: proc(e: ^Editor, name: string) {
@@ -134,13 +164,14 @@ open_index :: proc(e: ^Editor, index: int) {
 
 	close_map(e)
 	e.open = m
+	e.file = strings.clone(e.names[index])
 	if !rebuild(e) {
 		set_status(e, fmt.aprintf("%s did not survive being rebuilt", e.names[index]))
 		return
 	}
 	e.loaded = true
 	render.camera_fit(&e.camera, render.map_view_bounds(&e.level))
-	set_status(e, fmt.aprintf("%s  -  %d polygons", e.names[index], len(e.level.polys)))
+	set_status(e, fmt.aprintf("%s  -  %d polygons", e.file, len(e.level.polys)))
 	build_details(e)
 }
 
@@ -166,6 +197,8 @@ close_map :: proc(e: ^Editor) {
 	render.map_view_unload(&e.view)
 	sim.level_destroy(&e.level)
 	pms.destroy(&e.open)
+	delete(e.file)
+	e.file = ""
 	e.loaded = false
 }
 
@@ -173,6 +206,8 @@ close_map :: proc(e: ^Editor) {
 
 @(private)
 update :: proc(e: ^Editor, panes: Panes) {
+	if e.dialog != .None do return // the modal has the keyboard and the mouse
+
 	mouse := rl.GetMousePosition()
 	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
 	e.camera.viewport = panes.viewport
@@ -210,8 +245,19 @@ update :: proc(e: ^Editor, panes: Panes) {
 	}
 
 	if rl.IsKeyPressed(.F) do render.camera_fit(&e.camera, render.map_view_bounds(&e.level))
-	if rl.IsKeyPressed(.W) do e.wireframe = !e.wireframe
 	if rl.IsKeyPressed(.R) do e.layout = layout_default()
+	if rl.IsKeyPressed(.M) do e.layout.list_open = !e.layout.list_open
+	if rl.IsKeyPressed(.W) do toggle(e, .Wireframe)
+	if rl.IsKeyPressed(.S) do toggle(e, .Scenery)
+	if rl.IsKeyPressed(.P) do toggle(e, .Spawns)
+	if rl.IsKeyPressed(.C) do toggle(e, .Colliders)
+	if rl.IsKeyPressed(.B) do toggle(e, .Waypoints)
+}
+
+@(private)
+toggle :: proc(e: ^Editor, layer: Layer) {
+	if layer in e.show do e.show -= {layer}
+	else do e.show += {layer}
 }
 
 // ---- the frame ----
@@ -222,11 +268,20 @@ draw :: proc(e: ^Editor, panes: Panes) {
 	defer rl.EndDrawing()
 	rl.ClearBackground(theme_color(BG))
 
+	// A modal owns the window while it is up, so everything behind it is locked out.
+	if e.dialog != .None do rl.GuiLock()
+
 	draw_viewport(e, panes)
-	draw_list(e, panes)
+	if e.layout.list_open do draw_list(e, panes)
 	draw_inspector(e, panes)
 	draw_splitters(e, panes)
+	draw_toolbar(e, panes)
 	rl.GuiStatusBar(panes.status, temp_cstring(e.status))
+
+	if e.dialog != .None {
+		rl.GuiUnlock()
+		draw_dialog(e)
+	}
 }
 
 @(private)
@@ -237,14 +292,40 @@ draw_viewport :: proc(e: ^Editor, panes: Panes) {
 
 	if !e.loaded {
 		rl.DrawRectangleRec(vp, theme_color(PANEL))
-		rl.DrawText("pick a map on the left", c.int(vp.x) + 16, c.int(vp.y) + 16, 14, theme_color(TEXT_DIM))
+		rl.DrawText("pick a map, or make one", c.int(vp.x) + 16, c.int(vp.y) + 16, 14, theme_color(TEXT_DIM))
 		return
 	}
 
 	rl.DrawRectangleRec(vp, render.color_of(e.level.bg_bottom))
 	rl.BeginMode2D(render.rl_camera(&e.camera))
-	render.map_view_draw(&e.view, &e.camera, e.wireframe)
+	render.map_view_draw(&e.view, &e.camera, layer_parts(e.show))
+	draw_overlays(e)
 	rl.EndMode2D()
+}
+
+// ---- the new map dialog ----
+
+@(private)
+dialog_open_new :: proc(e: ^Editor) {
+	e.dialog = .New
+	e.name_buf = {}
+}
+
+@(private)
+draw_dialog :: proc(e: ^Editor) {
+	if e.dialog != .New do return
+	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
+	box := rl.Rectangle{w / 2 - 180, h / 2 - 70, 360, 140}
+	text := cstring(raw_data(e.name_buf[:]))
+
+	// -1 while it is still up; 0 is the close corner, then the buttons from 1.
+	switch rl.GuiTextInputBox(box, "New map", "Name", "Cancel;Create", text, NAME_MAX - 1, nil) {
+	case 0, 1:
+		e.dialog = .None
+	case 2:
+		e.dialog = .None
+		create_map(e, string(text))
+	}
 }
 
 // ---- odds and ends ----
