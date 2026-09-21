@@ -28,7 +28,7 @@ Target :: struct {
 }
 
 TARGETS := [?]Target{{"client", "client"}, {"server", "server"}}
-LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer", "shared/cvar"} // checked and tested, never built alone
+LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer", "shared/cvar", "shared/pms", "client/editor"} // checked and tested, never built alone
 
 Options :: struct {
 	release:  bool,

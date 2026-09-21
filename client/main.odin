@@ -14,6 +14,7 @@
 //
 //   client -cl_join IP [-cl_port N] [-cl_name NAME] [-cl_window] [-cl_headless]
 //          [-net_ping MS] [-net_jitter MS] [-net_loss PERCENT]
+//   client -cl_editor [-cl_map NAME]        the map editor instead of the game (editor/)
 //
 // Every setting is a cvar (settings.odin): config.cfg first, the command line over it,
 // `-cvars` to see them all. The client plays the maps the server names. net_ping,
@@ -29,6 +30,7 @@ import "core:time"
 import rl "vendor:raylib"
 import "audio"
 import "connection"
+import "editor"
 import "game"
 import "hud"
 import "input"
@@ -62,6 +64,14 @@ main :: proc() {
 	app.settings = settings_default()
 	settings_read(&app.settings)
 	o := &app.settings
+	if o.editor {
+		// The editor has no server and no soldier: a window, a share, and the maps in it.
+		rl.SetTraceLogLevel(.WARNING)
+		open_window(true) // an editor wants a window, not borderless fullscreen
+		defer rl.CloseWindow()
+		editor.run(o.base, o.map_name)
+		return
+	}
 	if o.join == "" {
 		fmt.eprintln("which server? client -cl_join IP ... (-cvars lists every setting)")
 		os.exit(2)

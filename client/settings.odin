@@ -39,6 +39,9 @@ Settings :: struct {
 	vote:       string, // a vote called a second in
 	config:     string,
 	list_cvars: bool,
+	// the map editor instead of the game: no server, no soldier, the maps in cl_base
+	editor:   bool,
+	map_name: string, // the map it opens with, if any
 }
 
 settings_default :: proc() -> Settings {
@@ -60,6 +63,8 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "cl_name", &s.name, "the name everyone sees")
 	cvar.add(c, "cl_window", &s.windowed, "in a window instead of borderless fullscreen")
 	cvar.add(c, "cl_headless", &s.headless, "no window, no picture, no sound: a player for the tests")
+	cvar.add(c, "cl_editor", &s.editor, "the map editor instead of the game")
+	cvar.add(c, "cl_map", &s.map_name, "the map the editor opens with")
 	cvar.add(c, "snd_volume", &s.volume, "how loud everything is, 0 to 1")
 	cvar.add(c, "net_ping", &s.ping, "a simulated line: the round trip in ms")
 	cvar.add(c, "net_jitter", &s.jitter, "and up to this many ms more at random")
