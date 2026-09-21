@@ -43,19 +43,18 @@ Settings :: struct {
 
 settings_default :: proc() -> Settings {
 	return {
-		base         = default_base(),
+		base         = ".",
 		name         = "Major",
 		port         = int(net.DEFAULT_PORT),
 		volume       = 0.12,
 		interp_least = 3,
 		clock_target = 2,
 		zoom         = 1,
-		config       = "config.cfg",
 	}
 }
 
 settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
-	cvar.add(c, "cl_base", &s.base, "where the maps and the art are read from")
+	cvar.add(c, "cl_base", &s.base, "where the maps, the art and config.cfg are read from")
 	cvar.add(c, "cl_join", &s.join, "the server to play on")
 	cvar.add(c, "cl_port", &s.port, "its port")
 	cvar.add(c, "cl_name", &s.name, "the name everyone sees")
@@ -85,8 +84,10 @@ settings_read :: proc(s: ^Settings) {
 	c: cvar.Set
 	settings_declare(&c, s)
 	for arg, i in os.args[1:] {
+		if arg == "-cl_base"   && i + 2 < len(os.args) do s.base = os.args[i + 2]
 		if arg == "-cl_config" && i + 2 < len(os.args) do s.config = os.args[i + 2]
 	}
+	if s.config == "" do s.config = strings.concatenate({s.base, "/config.cfg"})
 	cvar.load(&c, s.config, {"sv_"}) // the server's settings may share the file
 	for arg in cvar.parse(&c, os.args[1:]) do fmt.eprintfln("%s is no setting of the client", arg)
 	if s.list_cvars {
@@ -96,12 +97,6 @@ settings_read :: proc(s: ^Settings) {
 	if s.headless && s.name == "Major" do s.name = "Headless"
 }
 
-// Where the map and its art are read from: SOLDAT_BASE if it is set, and otherwise the
-// assets beside this checkout. cl_base overrides both.
-default_base :: proc() -> string {
-	if set := os.get_env("SOLDAT_BASE", context.allocator); set != "" do return set
-	return "assets"
-}
 
 // dbg_hold as the buttons it names.
 settings_hold :: proc(s: ^Settings) -> (held: sim.Buttons) {

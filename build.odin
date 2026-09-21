@@ -21,6 +21,7 @@ import "core:strconv"
 import "core:strings"
 
 BUILD_DIR :: "build"
+ASSETS_DIR :: "assets"
 
 Target :: struct {
 	src, out: string,
@@ -113,7 +114,7 @@ run_server :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	return run(argv({exe("server"), "-sv_port", fmt.tprint(opts.port)}, opts.server[:], opts.extra))
+	return run(argv({exe("server"), "-sv_base", assets(), "-sv_port", fmt.tprint(opts.port)}, opts.server[:], opts.extra))
 }
 
 // A server, with the bots asked for, and a client joined to it; everything stops when
@@ -122,13 +123,13 @@ dev :: proc(opts: Options) -> int {
 	if !opts.no_build {
 		if code := build_all(opts); code != 0 do return code
 	}
-	server, err := spawn(argv({exe("server"), "-sv_port", fmt.tprint(opts.port)}, opts.server[:]))
+	server, err := spawn(argv({exe("server"), "-sv_base", assets(), "-sv_port", fmt.tprint(opts.port)}, opts.server[:]))
 	if err != nil {
 		fmt.eprintfln("could not start the server: %v", err)
 		return 1
 	}
 	defer stop(server)
-	return run(argv({exe("client"), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
+	return run(argv({exe("client"), "-cl_base", assets(), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
 }
 
 clean :: proc() -> int {
@@ -160,6 +161,13 @@ exe :: proc(name: string) -> string {
 	suffix := ODIN_OS == .Windows ? ".exe" : ""
 	path, err := filepath.join({repo_root, BUILD_DIR, fmt.tprintf("%s%s", name, suffix)}, context.temp_allocator)
 	return err == nil ? path : fmt.tprintf("%s/%s%s", BUILD_DIR, name, suffix)
+}
+
+// The assets in the checkout, so a run from here finds the art and config.cfg whatever
+// the working directory is. A distribution unpacks them beside the executable instead.
+assets :: proc() -> string {
+	path, err := filepath.join({repo_root, ASSETS_DIR}, context.temp_allocator)
+	return err == nil ? path : ASSETS_DIR
 }
 
 ensure_build_dir :: proc() -> bool {

@@ -35,7 +35,7 @@ Settings :: struct {
 
 settings_default :: proc() -> Settings {
 	return {
-		base          = default_base(),
+		base          = ".",
 		maps          = "ctf_Ash",
 		port          = 23073,
 		time_limit    = f32(sim.DEFAULT_TIME_LIMIT) / sim.TICK_RATE / 60,
@@ -48,12 +48,11 @@ settings_default :: proc() -> Settings {
 		vote_percent  = 60,
 		max_rewind    = 300,
 		update_others = 2,
-		config        = "config.cfg",
 	}
 }
 
 settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
-	cvar.add(c, "sv_base", &s.base, "where the maps and the art are read from")
+	cvar.add(c, "sv_base", &s.base, "where the maps, the art and config.cfg are read from")
 	cvar.add(c, "sv_map", &s.maps, "the map, or several by comma, played in turn a round each")
 	cvar.add(c, "sv_port", &s.port, "the port to listen on")
 	cvar.add(c, "sv_bots", &s.bots, "bots the server plays itself")
@@ -77,10 +76,12 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 settings_read :: proc(s: ^Settings) {
 	c: cvar.Set
 	settings_declare(&c, s)
-	// the file names itself, so it is found on the command line first
+	// the base and the file name themselves, so they are found on the command line first
 	for arg, i in os.args[1:] {
+		if arg == "-sv_base"   && i + 2 < len(os.args) do s.base = os.args[i + 2]
 		if arg == "-sv_config" && i + 2 < len(os.args) do s.config = os.args[i + 2]
 	}
+	if s.config == "" do s.config = strings.concatenate({s.base, "/config.cfg"})
 	cvar.load(&c, s.config, {"cl_", "net_", "snd_", "r_", "ui_", "dbg_"}) // the client's may share the file
 	for arg in cvar.parse(&c, os.args[1:]) do fmt.eprintfln("%s is no setting of the server", arg)
 	if s.list_cvars {
@@ -89,12 +90,6 @@ settings_read :: proc(s: ^Settings) {
 	}
 }
 
-// Where the map and its art are read from: SOLDAT_BASE if it is set, and otherwise the
-// assets beside this checkout. sv_base overrides both.
-default_base :: proc() -> string {
-	if set := os.get_env("SOLDAT_BASE", context.allocator); set != "" do return set
-	return "assets"
-}
 
 // The maps named by sv_map, in the order they are played.
 settings_maps :: proc(s: ^Settings) -> []string {
