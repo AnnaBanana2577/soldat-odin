@@ -4,6 +4,7 @@ What is left. The readme says how the netcode works (the model, at the top) and 
 measured; this says what it does not do yet. Checked against the code on 2026-09-21.
 
 - Bots bullets are invisible
+- Roll/flip parity with opensoldat
 - Death ragdolls have weird physics currently
 - Weps menu after spawn not working
 - Spawn timer remove
