@@ -2,13 +2,25 @@ package render
 
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
-import "../game"
+
 import "../../shared/sim"
 
 // Everything drawn: the art read once (the gostek, the bullets and things), the map's
 // part read again whenever the game loads another map (its texture and scenery, its
 // polygons as meshes), and the sparks, the one part with a life of its own (tick).
 // Draws the game as it stands; changes nothing in it.
+// What a frame is drawn from, handed over rather than reached into: everything here
+// belongs to the simulation or is worked out by the caller, so render knows nothing of
+// a Game and can be used by anything that has a world to show.
+Scene :: struct {
+	ctx:    ^sim.Context,
+	world:  ^sim.World,
+	level:  ^sim.Level,
+	events: ^sim.Events,
+	loads:  int,        // maps the game has loaded: what the map.s part is rebuilt by
+	drawn:  []sim.Vec2, // where each soldier is drawn this frame (game.drawn_pos)
+}
+
 Render :: struct {
 	base:       string,
 	map_view:   Map_View, // the game's map, once it has one (map_view.odin)
@@ -40,13 +52,13 @@ destroy :: proc(r: ^Render) {
 // The map's part of the picture, when the game has loaded a map it was not built for.
 // The sparks of the last map go with it.
 @(private)
-map_sync :: proc(r: ^Render, g: ^game.Game) {
-	if r.map_loads == g.maps_loaded do return
+map_sync :: proc(r: ^Render, scene: ^Scene) {
+	if r.map_loads == scene.loads do return
 	map_unload(r)
-	map_view_load(&r.map_view, r.base, &g.level)
-	minimap_build(&r.minimap, &g.level, &r.map_view.meshes)
+	map_view_load(&r.map_view, r.base, scene.level)
+	minimap_build(&r.minimap, scene.level, &r.map_view.meshes)
 	for &spark in r.sparks.pool do spark = {}
-	r.map_loads = g.maps_loaded
+	r.map_loads = scene.loads
 }
 
 @(private)
@@ -58,19 +70,19 @@ map_unload :: proc(r: ^Render) {
 }
 
 // Once per tick: this tick's bursts, and every spark on.
-tick :: proc(r: ^Render, g: ^game.Game) {
-	map_sync(r, g)
+tick :: proc(r: ^Render, scene: ^Scene) {
+	map_sync(r, scene)
 	if r.map_view.level == nil do return
-	for e in sim.events_slice(&g.events) do sparks_event(&r.sparks, e, &g.world.soldiers)
-	sparks_corpses(&r.sparks, &g.world, &g.ctx.skeletons.gostek)
+	for e in sim.events_slice(scene.events) do sparks_event(&r.sparks, e, &scene.world.soldiers)
+	sparks_corpses(&r.sparks, scene.world, &scene.ctx.skeletons.gostek)
 	sparks_update(&r.sparks, r.map_view.level)
 }
 // The world's part of the frame, in the original's layer order: the sky, the background
 // polys, scenery behind, everything alive, scenery in front of it, the terrain, scenery
 // in front of the players, the sparks. The HUD goes over it (hud/). Reads the game,
 // changes nothing. Between the caller's BeginDrawing and EndDrawing.
-draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f64, wireframe: bool) {
-	map_sync(r, g)
+draw :: proc(r: ^Render, scene: ^Scene, camera: ^Camera, alpha: f32, seconds: f64, wireframe: bool) {
+	map_sync(r, scene)
 	v := &r.map_view
 	if v.level == nil { // no map yet: the server has not named one
 		rl.ClearBackground(rl.BLACK)
@@ -83,9 +95,9 @@ draw :: proc(r: ^Render, g: ^game.Game, camera: ^Camera, alpha: f32, seconds: f6
 	draw_background(v.level, camera)
 	if m.built do draw_mesh_now(m.background, m.material)
 	draw_scenery(v, 0)
-	things_draw(&r.things_art, &g.world, alpha, seconds)
-	draw_soldiers(r, g, alpha)
-	bullets_draw(&r.bullet_art, &g.world.bullets, alpha, seconds)
+	things_draw(&r.things_art, scene.world, alpha, seconds)
+	draw_soldiers(r, scene, alpha)
+	bullets_draw(&r.bullet_art, &scene.world.bullets, alpha, seconds)
 	draw_scenery(v, 1)
 	if m.built do draw_mesh_now(m.terrain, m.material)
 	draw_scenery(v, 2)
@@ -105,13 +117,13 @@ draw_mesh_now :: proc(mesh: rl.Mesh, material: rl.Material) {
 // The living on their animated pose at this frame's position, the dead on their
 // ragdoll's points between the last two ticks.
 @(private)
-draw_soldiers :: proc(r: ^Render, g: ^game.Game, alpha: f32) {
-	for &s, i in g.world.soldiers {
+draw_soldiers :: proc(r: ^Render, scene: ^Scene, alpha: f32) {
+	for &s, i in scene.world.soldiers {
 		if !s.active do continue
-		body := &g.world.ragdolls[i]
+		body := &scene.world.ragdolls[i]
 		// a dead soldier whose kill has not come yet holds its last pose
 		corpse := s.dead && body.active
-		pose := corpse ? sim.ragdoll_pose(body, alpha) : sim.soldier_pose(g.ctx.anims, &s, game.drawn_pos(g, i, alpha))
+		pose := corpse ? sim.ragdoll_pose(body, alpha) : sim.soldier_pose(scene.ctx.anims, &s, scene.drawn[i])
 		gostek_draw(&r.gostek, &s, &pose, corpse)
 	}
 }

@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
-import "../game"
+
 import "../../shared/sim"
 
 // Sounds, from Sound.pas and the play sites in Sprites.pas and Bullets.pas by way of
@@ -86,16 +86,16 @@ destroy :: proc(a: ^Audio) {
 
 // Once per tick: where we listen from (my soldier, or the view's centre `camera` when
 // there is none), then everything that sounded this tick.
-tick :: proc(a: ^Audio, g: ^game.Game, camera: sim.Vec2) {
+tick :: proc(a: ^Audio, ctx: ^sim.Context, w: ^sim.World, events: ^sim.Events, me: u8, camera: sim.Vec2) {
 	if !a.ready do return
-	me := &g.world.soldiers[g.me]
+	mine := &w.soldiers[me]
 	a.camera = camera
-	a.listener = me.active ? me.pos : a.camera
+	a.listener = mine.active ? mine.pos : a.camera
 	if a.ringing > -1 do a.ringing -= 1
-	audio_clock(a, &g.world.round)
-	for e in sim.events_slice(&g.events) do audio_event(a, e, g)
-	for &s, i in g.world.soldiers do audio_soldier(a, &g.ctx, u8(i), &s, g.world.tick)
-	audio_bullets(a, g)
+	audio_clock(a, &w.round)
+	for e in sim.events_slice(events) do audio_event(a, e, w, me)
+	for &s, i in w.soldiers do audio_soldier(a, ctx, u8(i), &s, w.tick)
+	audio_bullets(a, ctx, w, me)
 }
 
 // ---- playing ----
@@ -259,16 +259,16 @@ distant_sample :: proc(a: ^Audio, name: string) -> string {
 
 // ---- the events ----
 
-audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
-	w := &g.world
+audio_event :: proc(a: ^Audio, e: sim.Event, w: ^sim.World, me: u8) {
+
 	#partial switch v in e {
 	case sim.Fire:
 		if w.soldiers[v.player].bonus == .Predator do return // a predator fires silently
 		if v.weapon == .Flamer do voice_play(a, v.player, .Gattling, "flamer.wav", v.pos)
 		else do sound_play(a, FIRE_SOUNDS[v.weapon], v.pos)
 	case sim.Explosion:
-		me := &w.soldiers[g.me]
-		if me.active && me.health > -50 && sim.vec2_length(v.pos - a.listener) < GRENADE_EFFECT_DIST {
+		mine := &w.soldiers[me]
+		if mine.active && mine.health > -50 && sim.vec2_length(v.pos - a.listener) < GRENADE_EFFECT_DIST {
 			a.ringing = GRENADE_EFFECT_TIME
 			sound_flat(a, "hum.wav")
 		}
@@ -301,10 +301,10 @@ audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
 		sound_play(a, "bodyfall.wav", v.pos)
 		if v.fall > sim.CORPSE_CRACK_FALL && v.count < sim.CORPSE_CRACK_HITS do sound_play(a, "bonecrack.wav", v.pos)
 	case sim.Kill:
-		audio_kill(a, v, g.me)
+		audio_kill(a, v, me)
 		if w.soldiers[v.killer].bonus == .Berserker && v.killer != v.target do sound_play(a, "killberserk.wav", v.pos - {0, 12})
 	case sim.Respawn:
-		if v.target == g.me do sound_play(a, "wermusic.wav", v.pos)
+		if v.target == me do sound_play(a, "wermusic.wav", v.pos)
 		else do sound_play(a, "spawn.wav", v.pos)
 	case sim.Poly_Effect:
 		#partial switch v.type {
@@ -516,15 +516,15 @@ audio_soldier :: proc(a: ^Audio, ctx: ^sim.Context, slot: u8, s: ^sim.Soldier, t
 // A whistle 25 ticks into any round's flight but a shotgun's, and a whiz the first time
 // another's bullet enters the box around us.
 @(private = "file")
-audio_bullets :: proc(a: ^Audio, g: ^game.Game) {
-	me := &g.world.soldiers[g.me]
-	for &b, i in g.world.bullets {
+audio_bullets :: proc(a: ^Audio, ctx: ^sim.Context, w: ^sim.World, me: u8) {
+	mine := &w.soldiers[me]
+	for &b, i in w.bullets {
 		if !b.active {
 			a.whizzed[i] = false
 			continue
 		}
-		if b.timeout == g.ctx.weapons[b.weapon].timeout - 25 && b.style != .Shotgun do sound_play(a, "bulletby.wav", b.pos)
-		if a.whizzed[i] || b.owner == g.me || b.style == .Punch || b.style == .Flame || !me.active do continue
+		if b.timeout == ctx.weapons[b.weapon].timeout - 25 && b.style != .Shotgun do sound_play(a, "bulletby.wav", b.pos)
+		if a.whizzed[i] || b.owner == me || b.style == .Punch || b.style == .Flame || !mine.active do continue
 		d := b.pos - a.listener
 		if d.x > -200 && d.x < 200 && d.y > -350 && d.y < 100 {
 			sound_play(a, pick(a, WHIZ), b.pos)

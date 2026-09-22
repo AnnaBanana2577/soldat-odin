@@ -52,6 +52,7 @@ App :: struct {
 	render:      render.Render,
 	hud:         hud.Hud,
 	audio:       audio.Audio,
+	drawn:       [sim.MAX_PLAYERS]sim.Vec2, // where each soldier is drawn this frame
 	accumulator: f64,
 	seconds:     f64, // since the start: the wall clock the art animates on
 	last_frame:  time.Tick,
@@ -59,6 +60,23 @@ App :: struct {
 }
 
 app: App
+
+// What the renderer is given: the game as it stands, so that it need not know what a
+// Game is. The drawn positions are filled only for a frame that draws.
+scene_of :: proc() -> render.Scene {
+	return {
+		ctx    = &app.game.ctx,
+		world  = &app.game.world,
+		level  = &app.game.level,
+		events = &app.game.events,
+		loads  = app.game.maps_loaded,
+	}
+}
+
+drawn_positions :: proc(alpha: f32) -> []sim.Vec2 {
+	for i in 0 ..< len(app.drawn) do app.drawn[i] = game.drawn_pos(&app.game, i, alpha)
+	return app.drawn[:]
+}
 
 main :: proc() {
 	app.settings = settings_default()
@@ -98,9 +116,10 @@ main :: proc() {
 		ticks := ticks_owed(dt)
 		for _ in 0 ..< ticks {
 			game.tick(&app.game, &app.conn, &app.input)
-			render.tick(&app.render, &app.game)
+			tick_scene := scene_of()
+			render.tick(&app.render, &tick_scene)
 			hud.tick(&app.hud, &app.game)
-			audio.tick(&app.audio, &app.game, app.camera.pos)
+			audio.tick(&app.audio, &app.game.ctx, &app.game.world, &app.game.events, app.game.me, app.camera.pos)
 			input.clear(&app.input)
 		}
 
@@ -109,7 +128,9 @@ main :: proc() {
 		alpha := f32(app.accumulator / TICK) // how far into the next tick this frame is
 		render.camera_follow(&app.camera, game.drawn_pos(&app.game, int(app.game.me), alpha), cursor(), dt)
 		rl.BeginDrawing()
-		render.draw(&app.render, &app.game, &app.camera, alpha, app.seconds, app.settings.wireframe)
+		frame := scene_of()
+		frame.drawn = drawn_positions(alpha)
+		render.draw(&app.render, &frame, &app.camera, alpha, app.seconds, app.settings.wireframe)
 		hud.draw(&app.hud, &app.game, &app.render, &app.camera, cursor(), alpha)
 		rl.EndDrawing()
 		debug_frame(&app.debug, dt)
