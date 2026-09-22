@@ -125,3 +125,71 @@ depend on 3 having emptied the `Game` structs.
 
 The third is the one that matters. If the prediction error or the hits agreed move from
 the Stage 0 baseline, the stage is wrong, however well it reads.
+
+## Conventions
+
+**A top-level struct per program.** `Client` and `Server`, each with
+`client_init` / `client_run` / `client_destroy` beside it, and a `main.odin` that does
+nothing but call the three. The server is already shaped this way. The client is not:
+`App` is the `Client` under another name, and its loop is inlined in `main` on purpose
+(3e45c33), so that a frame reads top to bottom. Keep that: `client_run` is that same
+frame, moved, not broken into update and draw.
+
+**Procedures are `structname_*`,** unless the package exists for that one struct and its
+name already serves. `shared/sim` holds many types and prefixes them all
+(`soldier_spawn`, `bullet_spawn`); a package that is one type would stutter as
+`hud.hud_draw`. Odin's own core draws the line in the same place: `strings.Builder` with
+`strings.builder_init`, never `strings.strings_builder_init`.
+
+**The folders show the layering.** Not the whole graph, which is a DAG and will not fit
+in a tree, but the layers:
+
+	client/
+	  main.odin          three lines
+	  client.odin        Client, Client_Mode, init / run / destroy
+	  subsystems/        depend on shared/ and on nothing above them
+	    render/
+	    audio/
+	    input/
+	    net/
+	  game/              the running game: world, match, hud, camera
+	  editor/
+
+Everything under `subsystems/` must import only `shared/`. That is the rule the folder
+name is making, and it is worth something only if it is true.
+
+## Stage 6: the subsystems stop importing the game
+
+`client/render` and `client/audio` import `client/game` today, which under the layout
+above would be a subsystem importing the layer above it. The fix is small: both take
+`^game.Game` only as a parameter type, four procedures in render and three in audio.
+
+- They take what they read instead: the world, the view, the events, the level.
+- `drawn_pos` is already a one-line wrapper over `view_drawn_pos(view, world, slot,
+  alpha)`, so the thing render wants exists at the right level already.
+
+Do this before moving any folders. Moving them first would encode a layering the imports
+do not obey.
+
+## The HUD, and a cycle refactor.md does not see
+
+refactor.md revises itself to put the HUD inside `Client_Game`, on the grounds that the
+HUD is the running game's and the server must never know it exists. That reasoning is
+right, and in Odin it does not survive contact with the package system: the HUD calls
+*into* the game (`choose_team`, `vote_yes`, `ask_map`, `say`, and `game.Game` itself 29
+times), so `game` owning `hud` means each imports the other.
+
+Three ways out, in the order I would take them:
+
+1. **One package.** `client/game/` holds the world, the match, the prediction, the
+   camera and the HUD, as files with prefixed procedures: `hud_draw`, `view_advance`,
+   `game_tick`. This is how `shared/sim` already works, it is what the `structname_`
+   convention asks for, and the cycle simply stops existing. The cost is that `hud` and
+   `game` can no longer hide from each other behind `#+private`.
+2. **The HUD stays a sibling** and `Client` owns it, which is refactor.md's position
+   before it revised itself. No cycle, and the HUD is still only ever a reader plus a
+   few actions.
+3. **Invert the calls:** the HUD returns intents and the game applies them. Cleanest on
+   paper, most code for the least gain.
+
+I would take 1. It follows from the conventions above rather than fighting them.
