@@ -113,12 +113,21 @@ nothing.
 
 ## Order, and why
 
-Stage 6 first, then Stage 3, since the HUD cannot move under game/ until the outbox has
-left it. Stage 6 is self-contained, changes no protocol,
-and every folder move afterwards assumes it. Then 1, 2 and 3, the shared core, each one
-making the next smaller. Then 4 and 5, the client's shape, which need 3 to have emptied
-the `Game` structs first. The folders move last, when the imports already obey them.
+	6, 3, 1, 2, 4, 5, then the folders
 
+**6** first: self-contained, no protocol change, and every folder move afterwards
+assumes the subsystems import only `shared/`.
+
+**3** next, because it is what frees the HUD. Until the outbox leaves `Game` the HUD
+must reach through it, and nothing above can be arranged honestly.
+
+**1** and **2** then: the shared core, each making the next smaller. 1 changes the wire,
+so it wants a quiet moment; 2 is the safest change in the plan and can go whenever.
+
+**4** and **5** last of the code, since both need 3 to have emptied the `Game` structs.
+
+**The folders move at the end**, when the imports already obey the layering the names
+claim. Moving them earlier writes a promise the code has not made yet.
 ## The gate on every stage
 
 	odin run build.odin -file -- check
