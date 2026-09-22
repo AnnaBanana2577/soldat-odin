@@ -256,41 +256,37 @@ above would be a subsystem importing the layer above it. The fix is small: both 
 Do this before moving any folders. Moving them first would encode a layering the imports
 do not obey.
 
-## The HUD lives under game/, and imports nothing from it
+## What earns its own package
 
-The HUD is the running game's, so it sits under `game/` and the server never learns it
-exists. It stays its own package, and after Stage 3 it does not import `game` at all.
+A thing gets its own package when it can be isolated: when it needs nothing above it.
+Depending on `subsystems/` does not count against it, since everything depends on those.
+Anything else is a file in the package it belongs to.
 
-It looks at first as though it must. `client/hud` names `game` in forty-five places:
-`game.Game` as a parameter type twenty-nine times, and eight procedures called fourteen
-times between them. But look at what those procedures are:
+The rule already describes the best-organised part of this codebase. `shared/sim` is
+thirty-three files in one package because a bullet cannot be isolated from the soldier
+it wounds or the thing it pushes, and pretending otherwise would buy a boundary and pay
+for it at every call.
 
-	choose_team :: proc(g: ^Game, team: sim.Team) { append(&g.acts, net.Act{...}) }
-	say         :: proc(g: ^Game, line: string, team: bool) { append(&g.said, chat) }
-	call_kick   :: proc(g: ^Game, slot: u8, reason: string) { append(&g.called, v) }
-	ask_map     :: proc(g: ^Game, index: int) { append(&g.asked, net.Map_Query{...}) }
+Applied here:
 
-Seven of the eight are appends to the outbox and touch no world state whatever. The HUD
-is not depending on the game; it is reaching through `Game` to get at the outbox,
-because the outbox is a field of `Game` today. Stage 3 takes the outbox out. After that
-those calls go to the connection layer and the dependency is simply gone.
+- `render`, `audio`, `input`, `net`: after Stage 6 each imports only `shared/`, so each
+  is isolable and keeps its package, under `subsystems/`.
+- `editor`: imports `pms`, `sim` and `render`, all at or below it. Isolable, own package.
+- **`hud`: not isolable. A file in `game/`.**
 
-What is left is small and goes the right way:
+The HUD reads sixteen fields of `Game` and thirteen of them are `Client_Game` state
+rather than `shared/sim`: `me`, `my_lag`, `lags`, `names`, `bots`, `vote`, `heard`,
+`map_list`, `map_name`, `primary`, `secondary`, `events`. Only `world`, `ctx` and
+`level` are shared types. To make it a package you would pass thirteen things, or invent
+a `Hud_View` that is most of `Client_Game` under another name: a boundary that exists on
+paper and is paid for at every call site.
 
-- `name_of(g, slot)` is a roster lookup. The roster is client state, not world state,
-  and belongs beside the outbox.
-- `drawn_pos(g, slot, alpha)` is one line over `view_drawn_pos(view, world, slot,
-  alpha)`, so what the HUD wants already exists at the level it wants it.
-- `^game.Game` as a parameter becomes the world, the match and the view: `shared/sim`
-  types, which the HUD may import freely.
-- Two of the eight do a little more than append. `vote_yes` also clears `vote.active`,
-  which is local interface state and belongs to the HUD anyway. `choose_weapons` also
-  arms the soldier when it has not moved since spawning, which is the one genuine call
-  into the simulation, and `sim.soldier_arm` is already public.
+So `client/game/` holds `hud.odin`, `kill_feed.odin`, `scoreboard.odin`, `chat.odin`,
+`menus.odin` and the rest beside `world.odin`, `predict.odin` and `view.odin`, with
+procedures named for what they act on: `hud_draw`, `view_advance`, `game_tick`.
 
-So the HUD ends up importing `shared/sim`, `shared/net` and `render`, and nothing above
-it. `Client_Game` can own a `Hud` field with no cycle, which is what refactor.md wanted
-and could not see a way to.
-
-This changes the order: **Stage 3 must come before the HUD moves under `game/`.** Moving
-it first would mean importing `game` for an outbox that is about to leave.
+Stage 3 is still worth doing and still comes early, but for its own sake rather than the
+HUD's: it empties `Game` of the outbox so `Server_Game` is `{ world, match }`. What it
+does not do is make the HUD isolable, which is what an earlier draft of this plan
+claimed. The eight action procedures move to the outbox because that is where they
+belong, not because the HUD needs them moved to escape.
