@@ -3,9 +3,6 @@ package client
 import "core:fmt"
 import "core:strings"
 import rl "vendor:raylib"
-import "hud"
-import "game"
-import "render"
 import "../shared/sim"
 
 // Everything that exists for checking the game rather than playing it, in one place so
@@ -37,7 +34,7 @@ Debug :: struct {
 }
 
 // What the settings say of it, once they have been read.
-debug_init :: proc(d: ^Debug, s: ^Settings, camera: ^render.Camera) {
+debug_init :: proc(d: ^Debug, s: ^Settings, camera: ^Camera) {
 	d.hold = settings_hold(s)
 	d.aim, d.has_aim = settings_aim(s)
 	d.screenshot, d.seconds = s.screenshot, f64(s.seconds)
@@ -54,7 +51,7 @@ debug_frame :: proc(d: ^Debug, dt: f64) {
 	d.elapsed += dt
 	if d.menu != "" && !d.menu_done && d.elapsed > 0.5 {
 		d.menu_done = true
-		hud.open_menu(&app.hud, &app.game, d.menu)
+		hud_open_menu(&app.hud, &app.game, d.menu)
 	}
 	if d.vote != "" && !d.vote_done && d.elapsed > 1 {
 		d.vote_done = true
@@ -93,9 +90,9 @@ debug_vote :: proc(line: string) {
 		slot, _ := strings.split_iterator(&rest, " ")
 		at := 0
 		for c in slot do at = at * 10 + int(c - '0')
-		game.call_kick(&app.game, u8(at), strings.trim_space(rest))
+		call_kick(&app.game, u8(at), strings.trim_space(rest))
 	case "map":
-		game.call_map(&app.game, strings.trim_space(rest))
+		call_map(&app.game, strings.trim_space(rest))
 	case:
 		fmt.eprintfln("%q is no vote: kick SLOT REASON, or map NAME", line)
 	}

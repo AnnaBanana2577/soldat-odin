@@ -30,7 +30,8 @@ Target :: struct {
 }
 
 TARGETS := [?]Target{{"client", "client"}, {"server", "server"}}
-LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer", "shared/cvar", "shared/pms", "client/editor"} // checked and tested, never built alone
+LIBRARIES := [?]string{"shared/sim", "shared/net", "shared/timer", "shared/cvar", "shared/pms"} // checked, never built alone
+TESTED := [?]string{"client", "shared/sim", "shared/net", "shared/timer", "shared/cvar", "shared/pms"}
 
 Options :: struct {
 	release:  bool,
@@ -106,7 +107,8 @@ build_all :: proc(opts: Options) -> int {
 
 
 run_tests :: proc(opts: Options) -> int {
-	for lib in LIBRARIES {
+	// the client too, whose tests came with the editor when it folded in
+	for lib in TESTED {
 		fmt.printfln("testing %s", lib)
 		if code := run(argv({"odin", "test", lib, fmt.tprintf("-out:%s", exe("test"))}, flags(opts))); code != 0 do return code
 	}
