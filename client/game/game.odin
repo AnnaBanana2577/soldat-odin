@@ -50,10 +50,7 @@ Game :: struct {
 
 	pending:   [dynamic]sim.Command, // mine the server has not said it ran: what I replay
 	seq:       u32,                  // my commands are numbered from here
-	acts:      [dynamic]net.Act,     // what I chose, to tell once
-	called:    [dynamic]net.Vote,    // the votes I called or agreed to, to tell once
-	asked:     [dynamic]net.Map_Query, // and the maps I asked the name of
-	said:      [dynamic]net.Chat,    // what I said, to tell once
+	out:       connection.Outbox,    // what I have to tell the server that is not my keys
 	seen_shot: [sim.MAX_PLAYERS]u32, // the newest of each shooter's bullets flown here
 	newest:    u32, // the newest update taken: one that comes after a newer one is dropped
 	my_lag:    int, // how late the server finds I see the world, in ticks
@@ -109,10 +106,7 @@ destroy :: proc(g: ^Game) {
 	free(g.anims)
 	free(g.skeletons)
 	delete(g.pending)
-	delete(g.acts)
-	delete(g.called)
-	delete(g.asked)
-	delete(g.said)
+	connection.outbox_destroy(&g.out)
 	delete(g.heard)
 	free(g.incoming)
 }
@@ -264,21 +258,19 @@ receive_fact :: proc(g: ^Game, e: sim.Event) {
 // are mine to say).
 choose_weapons :: proc(g: ^Game, primary, secondary: sim.Weapon_Id) {
 	g.primary, g.secondary = primary, secondary
-	append(&g.acts, net.Act{action = .Loadout, weapon = primary, second = secondary})
+	connection.outbox_loadout(&g.out, primary, secondary)
 	mine := &g.world.soldiers[g.me]
 	if mine.active && !mine.dead && mine.spawn_still do sim.soldier_arm(&g.ctx, mine, primary, secondary)
 }
 
 // Joining the other team: the server moves me if the teams stay even, and says so.
 choose_team :: proc(g: ^Game, team: sim.Team) {
-	append(&g.acts, net.Act{action = .Join_Team, team = team})
+	connection.outbox_join_team(&g.out, team)
 }
 
 // A line to everyone, or to my team.
 say :: proc(g: ^Game, line: string, team: bool) {
-	chat := net.Chat{team = team}
-	net.text_set(&chat.text, line)
-	append(&g.said, chat)
+	connection.outbox_say(&g.out, line, team)
 }
 
 // A vote to send a player away, to be called or agreed to (server/vote.odin decides
@@ -286,19 +278,19 @@ say :: proc(g: ^Game, line: string, team: bool) {
 call_kick :: proc(g: ^Game, slot: u8, reason: string) {
 	v := net.Vote{kind = .Kick, target = slot}
 	net.text_set(&v.reason, reason)
-	append(&g.called, v)
+	connection.outbox_vote(&g.out, v)
 }
 
 // And one to play another map.
 call_map :: proc(g: ^Game, map_name: string) {
 	v := net.Vote{kind = .Map, name = net.name_make(map_name)}
-	append(&g.called, v)
+	connection.outbox_vote(&g.out, v)
 }
 
 // My vote for whatever is running.
 vote_yes :: proc(g: ^Game) {
 	if !g.vote.active do return
-	append(&g.called, net.Vote{kind = g.vote.kind, target = g.vote.target, name = g.vote.name})
+	connection.outbox_vote(&g.out, net.Vote{kind = g.vote.kind, target = g.vote.target, name = g.vote.name})
 	g.vote.active = false // it is out of my hands now, and off my screen
 }
 
@@ -310,7 +302,7 @@ vote_no :: proc(g: ^Game) {
 // The name of the server's map at `index`, for the map window, which comes back as
 // map_list.
 ask_map :: proc(g: ^Game, index: int) {
-	append(&g.asked, net.Map_Query{index = u16(max(index, 0))})
+	connection.outbox_ask_map(&g.out, index)
 }
 
 name_of :: proc
@@ -383,14 +375,7 @@ send :: proc(g: ^Game, conn: ^connection.Connection) {
 	}
 	connection.send_message(conn, m)
 
-	for a in g.acts do connection.send_message(conn, a)
-	for v in g.called do connection.send_message(conn, v)
-	for q in g.asked do connection.send_message(conn, q)
-	clear(&g.called)
-	clear(&g.asked)
-	for c in g.said do connection.send_message(conn, c)
-	clear(&g.said)
-	clear(&g.acts)
+	connection.outbox_send(&g.out, conn)
 	connection.flush(conn)
 }
 
