@@ -17,7 +17,10 @@ x Roll/flip parity with opensoldat
   - Kill feed and console each draw in one colour; the original colours by kind (join, vote, death, server)
   - Scoreboard: no spectators, no PageUp/PageDown scrolling, shows the map name where a server name belongs
   - Shirt colours are team colours — the roster carries names only, so this needs a wire change
-  - Cease-fire counter draws always; the original draws it in survival mode only
+  - Gostek has no hair, helmet or hat (nor the grabbed one the wipe and take-off antics
+    pull off) and no chains — the same wire change as the shirt colours; and no cigar,
+    which wants a lit one on the soldier first (HasCigar, off the cigar and match antics)
+  x Cease-fire counter draws always; the original draws it in survival mode only
   Missing outright:
     7. Weapon stats page (F2)
     8. Radio menu (V)
