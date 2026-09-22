@@ -7,11 +7,7 @@ x Bots bullets are invisible
 x Death ragdolls have weird physics currently
 x Weps menu after spawn not working
 x Spawn timer remove
-x Roll/flip parity with opensoldat — read against Control.pas line for line and traced
-  tick for tick against ../soldat-love, which agrees: entry, direction, forces, the two
-  machines in lockstep, the graceful end, the free flip, the animation files and their
-  speeds, the stance, and the roll's sound and the reload it silences all match. Nothing
-  found to fix; shared/sim/movement_test.odin now holds it there.
+x Roll/flip parity with opensoldat
 - Flag throws
 - HUD parity
   - Big Messages for everything
