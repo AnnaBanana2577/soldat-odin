@@ -35,6 +35,7 @@ TICK :: sim.TICK
 MAX_FRAME :: 0.25 // a stall never turns into a burst of ticks
 
 Client :: struct {
+	mode:        Client_Mode,
 	settings:    Settings,
 	debug:       Debug,
 	conn:        Connection,
@@ -43,6 +44,7 @@ Client :: struct {
 	input:       Input,
 	render:      Render,
 	audio:       Audio,
+	editor:      Editor,   // the other mode
 	drawn:       [sim.MAX_PLAYERS]sim.Vec2, // where each soldier is drawn this frame
 	accumulator: f64,
 	seconds:     f64, // since the start: the wall clock the art animates on
@@ -69,57 +71,89 @@ drawn_positions :: proc(alpha: f32) -> []sim.Vec2 {
 	return client.drawn[:]
 }
 
-// ---- the game: opened, run and closed ----
+// ---- the modes: opened, run and closed ----
 
-client_init :: proc(o: ^Settings) {
-
-	rl.SetTraceLogLevel(.WARNING)
-	open_window(o.windowed)
-	open_connection()
-	if !game_init(&client.game, o.base, client.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
-	render_init(&client.render, o.base)
-	hud_init(&client.game.hud, o.base)
-	audio_init(&client.audio, o.base, o.volume)
-	client.game.camera.zoom = 1
-	debug_init(&client.debug, o, &client.game.camera)
+// Which of the client's modes is running. The window, the renderer and the input are
+// the client's and are shared; what a mode owns is its own.
+Client_Mode :: enum {
+	Game,
+	Editor,
+	// Menu and Console to come
 }
 
+client_init :: proc(o: ^Settings) -> bool {
+	rl.SetTraceLogLevel(.WARNING)
+	switch client.mode {
+	case .Editor:
+		open_window(true) // an editor wants a window, not borderless fullscreen
+		return editor_open(&client.editor, o.base, o.map_name)
+	case .Game:
+		open_window(o.windowed)
+		open_connection()
+		if !game_init(&client.game, o.base, client.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
+		render_init(&client.render, o.base)
+		hud_init(&client.game.hud, o.base)
+		audio_init(&client.audio, o.base, o.volume)
+		client.game.camera.zoom = 1
+		debug_init(&client.debug, o, &client.game.camera)
+	}
+	return true
+}
+
+// One loop for every mode: the window says when to stop, and the mode says what a frame
+// is. A mode that wants out sets client.quit.
 client_run :: proc(o: ^Settings) {
-	for !rl.WindowShouldClose() && !client.conn.lost && !client.quit {
-		dt := frame_seconds()
-		sample_input()
-
-		ticks := ticks_owed(dt)
-		for _ in 0 ..< ticks {
-			game_tick(&client.game, &client.conn, &client.input)
-			tick_scene := scene_of()
-			render_tick(&client.render, &tick_scene)
-			hud_tick(&client.game.hud, &client.game)
-			audio_tick(&client.audio, &client.game.content.ctx, &client.game.world, &client.game.events, client.game.me, client.game.camera.pos)
-			input_clear(&client.input)
+	for !rl.WindowShouldClose() && !client.quit {
+		switch client.mode {
+		case .Game:
+			if client.conn.lost do return
+			game_frame(o)
+		case .Editor:
+			editor_frame(&client.editor)
 		}
-
-		if client.game.missing != "" do fail("the server plays %s, which is not in %s", client.game.missing, o.base)
-
-		alpha := f32(client.accumulator / TICK) // how far into the next tick this frame is
-		camera_follow(&client.game.camera, drawn_pos(&client.game, int(client.game.me), alpha), cursor(), dt)
-		rl.BeginDrawing()
-		frame := scene_of()
-		frame.drawn = drawn_positions(alpha)
-		render_draw(&client.render, &frame, &client.game.camera, alpha, client.seconds, client.settings.wireframe)
-		hud_draw(&client.game.hud, &client.game, &client.render, &client.game.camera, cursor(), alpha)
-		rl.EndDrawing()
-		debug_frame(&client.debug, dt)
-		free_all(context.temp_allocator) // the frame's scratch: its strings
 	}
 }
 
+@(private = "file")
+game_frame :: proc(o: ^Settings) {
+	dt := frame_seconds()
+	sample_input()
+
+	ticks := ticks_owed(dt)
+	for _ in 0 ..< ticks {
+		game_tick(&client.game, &client.conn, &client.input)
+		tick_scene := scene_of()
+		render_tick(&client.render, &tick_scene)
+		hud_tick(&client.game.hud, &client.game)
+		audio_tick(&client.audio, &client.game.content.ctx, &client.game.world, &client.game.events, client.game.me, client.game.camera.pos)
+		input_clear(&client.input)
+	}
+
+	if client.game.missing != "" do fail("the server plays %s, which is not in %s", client.game.missing, o.base)
+
+	alpha := f32(client.accumulator / TICK) // how far into the next tick this frame is
+	camera_follow(&client.game.camera, drawn_pos(&client.game, int(client.game.me), alpha), cursor(), dt)
+	rl.BeginDrawing()
+	frame := scene_of()
+	frame.drawn = drawn_positions(alpha)
+	render_draw(&client.render, &frame, &client.game.camera, alpha, client.seconds, client.settings.wireframe)
+	hud_draw(&client.game.hud, &client.game, &client.render, &client.game.camera, cursor(), alpha)
+	rl.EndDrawing()
+	debug_frame(&client.debug, dt)
+	free_all(context.temp_allocator) // the frame's scratch: its strings
+}
+
 client_destroy :: proc() {
-	audio_destroy(&client.audio)
-	hud_destroy(&client.game.hud)
-	render_destroy(&client.render)
-	game_destroy(&client.game)
-	connection_close(&client.conn)
+	switch client.mode {
+	case .Editor:
+		editor_destroy(&client.editor)
+	case .Game:
+		audio_destroy(&client.audio)
+		hud_destroy(&client.game.hud)
+		render_destroy(&client.render)
+		game_destroy(&client.game)
+		connection_close(&client.conn)
+	}
 	rl.CloseWindow()
 }
 

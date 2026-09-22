@@ -75,32 +75,32 @@ Editor :: struct {
 
 // Open the editor on a share and run until the window closes. The window must already
 // be open; the caller owns it.
-editor_run :: proc(base: string, first_map: string) {
-	e := Editor {
+// The editor as the client's other mode: opened, stepped a frame at a time by
+// client_run, and closed. It shares the window with the game and owns nothing else.
+editor_open :: proc(e: ^Editor, base: string, first_map: string) -> bool {
+	e^ = Editor {
 		base   = base,
 		active = -1,
 		layout = layout_default(),
 		show   = DEFAULT_LAYERS,
 		status = strings.clone("pick a map"),
 	}
-	defer editor_destroy(&e)
-
-	reload_names(&e)
+	reload_names(e)
 	if len(e.names) == 0 {
 		fmt.eprintfln("no maps in %s/maps", base)
-		return
+		return false
 	}
-
 	e.camera.zoom = 1
 	theme_apply()
-	if first_map != "" do open_named(&e, first_map)
+	if first_map != "" do open_named(e, first_map)
+	return true
+}
 
-	for !rl.WindowShouldClose() {
-		free_all(context.temp_allocator)
-		panes := layout_panes(e.layout, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight()))
-		update(&e, panes)
-		editor_draw(&e, panes)
-	}
+editor_frame :: proc(e: ^Editor) {
+	free_all(context.temp_allocator)
+	panes := layout_panes(e.layout, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight()))
+	update(e, panes)
+	editor_draw(e, panes)
 }
 
 @(private)

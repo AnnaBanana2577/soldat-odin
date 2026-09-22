@@ -28,26 +28,31 @@ import "core:fmt"
 import "core:os"
 import rl "vendor:raylib"
 
-// Which of the client's modes to run. Settings first, since they say which.
+// The settings say which mode to run, and then it is opened, run and closed. The
+// headless client is not a mode: it has no window, and a mode is a thing with a frame.
 main :: proc() {
 	client.settings = settings_default()
 	settings_read(&client.settings)
 	o := &client.settings
-	switch {
-	case o.editor:
-		// The editor has no server and no soldier: a window, a share, and the maps in it.
-		rl.SetTraceLogLevel(.WARNING)
-		open_window(true) // an editor wants a window, not borderless fullscreen
-		defer rl.CloseWindow()
-		editor_run(o.base, o.map_name)
-	case o.join == "":
-		fmt.eprintln("which server? client -cl_join IP ... (-cvars lists every setting)")
-		os.exit(2)
-	case o.headless:
+	if o.editor do client.mode = .Editor
+
+	if o.headless {
+		if o.join == "" do no_server()
 		run_headless()
-	case:
-		client_init(o)
-		client_run(o)
-		client_destroy()
+		return
 	}
+	if client.mode == .Game && o.join == "" do no_server()
+
+	if !client_init(o) {
+		rl.CloseWindow()
+		return
+	}
+	client_run(o)
+	client_destroy()
+}
+
+@(private = "file")
+no_server :: proc() -> ! {
+	fmt.eprintln("which server? client -cl_join IP ... (-cvars lists every setting)")
+	os.exit(2)
 }
