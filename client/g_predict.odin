@@ -31,7 +31,7 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 	was_alive := mine.active && !mine.dead
 
 	sim.soldier_copy_served(mine, &e.soldier)
-	if e.has_owned do sim.soldier_copy_owned(g.ctx.anims, mine, &e.soldier)
+	if e.has_owned do sim.soldier_copy_owned(g.content.ctx.anims, mine, &e.soldier)
 	if e.has_rest do sim.soldier_copy_rest(mine, &e.soldier)
 
 	// The weapons menu's pick, held over the server's word until that word carries it.
@@ -42,7 +42,7 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 	// me under (server/odin's Loadout).
 	if mine.active && !mine.dead && mine.spawn_still {
 		if mine.weapon.id != g.primary || mine.secondary.id != g.secondary {
-			sim.soldier_arm(&g.ctx, mine, g.primary, g.secondary)
+			sim.soldier_arm(&g.content.ctx, mine, g.primary, g.secondary)
 		}
 	}
 
@@ -56,9 +56,9 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 	scratch: sim.Events // the effects of these ticks were shown when they first ran
 	for cmd in g.pending {
 		sim.events_clear(&scratch)
-		sim.soldier_step(&g.ctx, &g.world, g.me, cmd, &scratch)
+		sim.soldier_step(&g.content.ctx, &g.world, g.me, cmd, &scratch)
 		for &b, i in g.world.bullets {
-			if b.active && b.owner == g.me && b.spawn_cmd > ack do sim.bullet_fast_forward(&g.ctx, &g.world, i, 1, &scratch)
+			if b.active && b.owner == g.me && b.spawn_cmd > ack do sim.bullet_fast_forward(&g.content.ctx, &g.world, i, 1, &scratch)
 		}
 		g.world.tick += 1
 	}

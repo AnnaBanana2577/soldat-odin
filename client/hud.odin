@@ -231,7 +231,7 @@ hud_draw :: proc(h: ^Hud, g: ^Game, r: ^Render, camera: ^Camera, cursor: sim.Vec
 // count and the weapon's name. Each bar sits beside its icon.
 @(private)
 draw_bars :: proc(h: ^Hud, g: ^Game, sc: Screen, s: ^sim.Soldier) {
-	info := &g.ctx.weapons[s.weapon.id]
+	info := &g.content.ctx.weapons[s.weapon.id]
 
 	draw_art(h.art[.Health], sc, spread(sc, 5), 439, ART_SCALE, rl.WHITE)
 	draw_bar(h.art[.Health_Bar], sc, beside(sc, 45, 5), 449, s.health / sim.DEFAULT_HEALTH)
@@ -247,7 +247,7 @@ draw_bars :: proc(h: ^Hud, g: ^Game, sc: Screen, s: ^sim.Soldier) {
 	if info.fire_interval > 0 do draw_bar(h.art[.Fire_Bar], sc, beside(sc, 409, 275), 464, f32(s.weapon.fire_count) / f32(info.fire_interval), from_right = true)
 
 	draw_art(h.art[.Jet], sc, spread(sc, 480), 439, ART_SCALE, rl.WHITE)
-	if g.level.start_jet > 0 do draw_bar(h.art[.Jet_Bar], sc, beside(sc, 520, 480), 449, f32(s.jets) / f32(g.level.start_jet))
+	if g.content.level.start_jet > 0 do draw_bar(h.art[.Jet_Bar], sc, beside(sc, 520, 480), 449, f32(s.jets) / f32(g.content.level.start_jet))
 
 	nade := h.art[.Nade]
 	for j in 1 ..= int(s.grenades) {

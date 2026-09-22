@@ -44,7 +44,7 @@ scoreboard_draw :: proc(h: ^Hud, g: ^Game, sc: Screen) {
 	bottom := 70 + f32(count + 1) * SCORES_ROW + 15 * f32(teams)
 	draw_panel(h, sc, x + 25, y + 5, SCORES_WIDTH, bottom)
 
-	text(h, sc, .Small, g.map_name, x + 30, y + 15, {233, 180, 12, 255})
+	text(h, sc, .Small, g.content.map_name, x + 30, y + 15, {233, 180, 12, 255})
 	seconds := max(w.round.time_left, 0) / sim.TICK_RATE
 	text(h, sc, .Small, fmt.tprintf("Time %02d:%02d", seconds / 60, seconds % 60), x + 485, y + 15, {170, 160, 200, 230})
 	text(h, sc, .Small, "Players", x + 330, y + 15, {200, 190, 180, 240})

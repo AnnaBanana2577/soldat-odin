@@ -30,7 +30,7 @@ name_draw :: proc(h: ^Hud, g: ^Game, sc: Screen, camera: ^Camera, alpha: f32, sl
 	line := name_of(g, slot)
 	if line == "" do return
 	drawn := drawn_pos(g, int(slot), alpha)
-	pose := sim.soldier_pose(g.ctx.anims, s, drawn)
+	pose := sim.soldier_pose(g.content.ctx.anims, s, drawn)
 	at := world_to_screen(camera, pose[6]) / sc.scale + {0, 5}
 
 	width, height := text_width(h, sc, .Small, line), FONT_UNITS[.Small]

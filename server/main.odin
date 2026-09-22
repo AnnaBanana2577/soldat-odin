@@ -80,5 +80,6 @@ server_loop :: proc() {
 cleanup :: proc() {
 	timer.fine_sleep_end()
 	host_close(&server.host)
+	sim.content_destroy(&server.game.content)
 }
 

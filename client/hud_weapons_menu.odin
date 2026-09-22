@@ -111,7 +111,7 @@ menu_draw :: proc(h: ^Hud, g: ^Game, sc: Screen) {
 			draw_art(icon, sc, 55, top + max(0, ROW_STEP - icon_height) / 2, ART_SCALE, tint)
 		}
 
-		name := g.ctx.weapons[weapon].name
+		name := g.content.ctx.weapons[weapon].name
 		caption := row < len(MENU_PRIMARIES) ? fmt.tprintf("%d %s", (row + 1) % 10, name) : name
 		color := rl.Color{255, 255, 255, 230}
 		x, y := f32(ROW_X + 85), top + (ROW_STEP - FONT_UNITS[.Small]) / 2

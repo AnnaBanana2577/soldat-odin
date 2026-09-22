@@ -29,18 +29,13 @@ import "../shared/sim"
 // other clients fly that bullet on by its shooter's lag plus their own (client/game),
 // so the bullet each of them sees is the one that will be ruled on.
 Game :: struct {
-	ctx:        sim.Context,
-	level:      sim.Level,
-	anims:      ^sim.Anims,
-	skeletons:  ^sim.Skeletons,
+	content:    sim.Content, // the map, the animations, the skeletons, the weapons
 	world:      sim.World,
 	history:    sim.History, // the last second of soldiers, for judging shots as their shooters saw
 	max_rewind: u32,         // ticks: how far back a shot is judged at most; a slower shooter leads
-	base:       string,      // where the maps are
 	rules:      Rules,
 	map_index:  int,         // of the one being played, in rules.maps
 	events:     sim.Events,  // this tick's
-	map_name:   string,
 	clients:    [sim.MAX_PLAYERS]Client,
 	bots:       sim.Bots,           // the brains of the slots the server plays itself
 	profiles:   []sim.Bot_Profile, // the personality files they are drawn from
@@ -106,14 +101,10 @@ CHAT_EVERY      :: 30  // ticks a client must wait between two lines: half a sec
 
 // The first map, and the data every map shares. False when the first map will not load.
 game_init :: proc(g: ^Game, base: string, rules: Rules) -> bool {
-	g.base, g.rules = base, rules
+	g.rules = rules
 	g.max_rewind = min(rules.max_rewind, sim.HISTORY_TICKS - 1)
-	if anims, ok := sim.anims_load_files(base); ok do g.anims = anims
-	if sk, ok := sim.skeletons_load_files(base); ok do g.skeletons = sk
-	g.ctx.level = &g.level
-	g.ctx.anims = g.anims
-	g.ctx.skeletons = g.skeletons
-	sim.weapons_default(&g.ctx.weapons)
+	// a hard failure now, where the server used to carry on with no animations at all
+	if !sim.content_load(&g.content, base) do return false
 	g.profiles = sim.bot_profiles_load(base)
 	sim.world_init(&g.world, 1)
 	g.world.authority = true
@@ -131,24 +122,20 @@ game_init :: proc(g: ^Game, base: string, rules: Rules) -> bool {
 // and the placings, which go out with this tick's news.
 next_round :: proc(g: ^Game, host: ^Host) {
 	g.map_index = (g.map_index + 1) % len(g.rules.maps)
-	if !map_load(g, g.rules.maps[g.map_index]) do fmt.eprintfln("could not load %s; %s again", g.rules.maps[g.map_index], g.map_name)
+	if !map_load(g, g.rules.maps[g.map_index]) do fmt.eprintfln("could not load %s; %s again", g.rules.maps[g.map_index], g.content.map_name)
 	round_start(g)
 	g.outgoing = map_message(g)
 	send_message(g, host, EVERYONE)
 	for &s, i in g.world.soldiers {
 		if !s.active do continue
 		s.kills, s.deaths, s.flags, s.dead = 0, 0, 0, false
-		sim.soldier_respawn(&g.ctx, &g.world, u8(i), &g.events)
+		sim.soldier_respawn(&g.content.ctx, &g.world, u8(i), &g.events)
 	}
-	fmt.printfln("a round on %s", g.map_name)
+	fmt.printfln("a round on %s", g.content.map_name)
 }
 
 map_load :: proc(g: ^Game, name: string) -> bool {
-	level, ok := sim.level_load_file(g.base, name)
-	if !ok do return false
-	if g.map_name != "" do sim.level_destroy(&g.level)
-	g.level, g.map_name = level, name
-	return true
+	return sim.content_load_map(&g.content, name)
 }
 
 // A round on the loaded map: no bullets and no corpses, its things placed, the scores
@@ -164,13 +151,13 @@ round_start :: proc(g: ^Game) {
 	w.round.max_grenades = g.rules.max_grenades
 	w.round.friendly_fire = g.rules.friendly_fire
 	w.round.kits_collide = g.rules.kits_collide
-	sim.things_spawn(&g.ctx, w)
+	sim.things_spawn(&g.content.ctx, w)
 	g.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
 	clear(&g.born)
 }
 
 map_message :: proc(g: ^Game) -> net.Message {
-	return net.Map{name = g.map_name, flag_home = g.world.flag_home, tick = g.world.tick}
+	return net.Map{name = g.content.map_name, flag_home = g.world.flag_home, tick = g.world.tick}
 }
 
 tick :: proc(g: ^Game, host: ^Host) {
@@ -200,9 +187,9 @@ step_soldiers :: proc(g: ^Game) {
 		slot := u8(i)
 		before := g.events.count
 		if c.bot {
-			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(&g.bots, &g.ctx, w, slot), &g.events)
+			sim.soldier_step(&g.content.ctx, w, slot, sim.bot_command(&g.bots, &g.content.ctx, w, slot), &g.events)
 		} else {
-			for cmd in queue_take(&c.queue, buf[:]) do sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
+			for cmd in queue_take(&c.queue, buf[:]) do sim.soldier_step(&g.content.ctx, w, slot, cmd, &g.events)
 		}
 		// its own client fired these already; everyone else hears of them
 		for k in before ..< g.events.count {
@@ -265,7 +252,7 @@ join_team :: proc(g: ^Game, host: ^Host, slot: u8, team: sim.Team) {
 	}
 	sim.flag_let_go(&g.world, slot)
 	s.team, s.dead = team, false
-	sim.soldier_respawn(&g.ctx, &g.world, slot, &g.events)
+	sim.soldier_respawn(&g.content.ctx, &g.world, slot, &g.events)
 	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", net.text_string(&g.clients[slot].name), team))
 }
 
@@ -313,7 +300,7 @@ receive_act :: proc(g: ^Game, host: ^Host, slot: u8, m: net.Act) {
 			// and into its hands at once in a life it has not moved in yet, which is
 			// what its client has already done with it: a soldier's weapons are its
 			// own client's to say for as long as the menu is still up
-			if !s.dead && s.spawn_still do sim.soldier_arm(&g.ctx, s, m.weapon, m.second)
+			if !s.dead && s.spawn_still do sim.soldier_arm(&g.content.ctx, s, m.weapon, m.second)
 		}
 	}
 }
@@ -446,7 +433,7 @@ spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 	}
 	team := alpha <= bravo ? sim.Team.Alpha : sim.Team.Bravo
 	g.world.soldiers[slot] = {team = team, primary_choice = .AK74, secondary_choice = .Colt}
-	sim.soldier_respawn(&g.ctx, &g.world, slot, &g.events)
+	sim.soldier_respawn(&g.content.ctx, &g.world, slot, &g.events)
 	return team
 }
 
@@ -470,13 +457,13 @@ leave :: proc(g: ^Game, host: ^Host, slot: u8) {
 // so that a bullet meets a body on the server as it does on the screen that fired it.
 step_world :: proc(g: ^Game) {
 	w := &g.world
-	sim.ragdolls_update(&g.ctx, w, &g.events)
-	sim.things_update(&g.ctx, w, &g.events)
-	sim.bullets_update(&g.ctx, w, &g.events)
-	sim.round_tick(&g.ctx, w, &g.events)
+	sim.ragdolls_update(&g.content.ctx, w, &g.events)
+	sim.things_update(&g.content.ctx, w, &g.events)
+	sim.bullets_update(&g.content.ctx, w, &g.events)
+	sim.round_tick(&g.content.ctx, w, &g.events)
 	reported := g.events.count
 	for i in 0 ..< reported {
-		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, w, hit, &g.events)
+		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.content.ctx, w, hit, &g.events)
 	}
 	for e in sim.events_slice(&g.events) {
 		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && !g.clients[v.owner].bot {

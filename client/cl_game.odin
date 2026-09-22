@@ -26,14 +26,8 @@ import "../shared/sim"
 // weapons, the things' skeletons). The map is the one the server names, on joining and
 // at every round (receive_map); until it has named one there is nothing to play.
 Game :: struct {
-	ctx:       sim.Context,
-	base:      string,
-	level:     sim.Level,
-	map_name:  string, // the loaded map's
-	maps_loaded: int,  // how many maps were loaded: what the picture is rebuilt by
+	content:   sim.Content,   // the map, the animations, the skeletons, the weapons
 	missing:   string, // a map the server named and that is not here
-	anims:     ^sim.Anims,
-	skeletons: ^sim.Skeletons,
 	world:     sim.World,
 	me:        u8,
 	view:      View,       // the others
@@ -78,14 +72,7 @@ PENDING_KEPT     :: 64 // commands kept waiting for the server's word on them: a
 // `interp_least` is how far behind the newest word of the others they are shown, at the
 // least, and `clock_target` how many commands to keep waiting on the server.
 game_init :: proc(g: ^Game, base: string, me: u8, interp_least: int, clock_target: f32) -> bool {
-	ok: bool
-	g.base = base
-	if g.anims, ok = sim.anims_load_files(base); !ok do return false
-	if g.skeletons, ok = sim.skeletons_load_files(base); !ok do return false
-	g.ctx.level = &g.level
-	g.ctx.anims = g.anims
-	g.ctx.skeletons = g.skeletons
-	sim.weapons_default(&g.ctx.weapons)
+	if !sim.content_load(&g.content, base) do return false
 	g.me = me
 	g.primary, g.secondary = .AK74, .Colt // what the server arms a newcomer with
 	sim.world_init(&g.world, 0)
@@ -98,11 +85,8 @@ game_init :: proc(g: ^Game, base: string, me: u8, interp_least: int, clock_targe
 }
 
 game_destroy :: proc(g: ^Game) {
-	if g.maps_loaded > 0 do sim.level_destroy(&g.level)
-	delete(g.map_name)
+	sim.content_destroy(&g.content)
 	delete(g.missing)
-	free(g.anims)
-	free(g.skeletons)
 	delete(g.pending)
 	outbox_destroy(&g.out)
 	delete(g.heard)
@@ -112,7 +96,7 @@ game_destroy :: proc(g: ^Game) {
 game_tick :: proc(g: ^Game, conn: ^Connection, in_: ^Input) {
 	sim.events_clear(&g.events)
 	clear(&g.heard)
-	view_advance(&g.view, &g.ctx, &g.world, g.me)
+	view_advance(&g.view, &g.content.ctx, &g.world, g.me)
 	if g.vote.active && g.vote.ticks > 0 do g.vote.ticks -= 1 // the server says when it is over
 	game_receive(g, conn)
 	step_mine(g, in_)
@@ -131,7 +115,7 @@ game_receive :: proc(g: ^Game, conn: ^Connection) {
 		case net.Map:
 			receive_map(g, &m)
 		case net.Update:
-			if g.maps_loaded > 0 do receive_update(g, &m)
+			if g.content.loads > 0 do receive_update(g, &m)
 		case net.Chat:
 			append(&g.heard, m)
 		case net.Roster:
@@ -153,18 +137,12 @@ game_receive :: proc(g: ^Game, conn: ^Connection) {
 // the bullets and the corpses gone; the scores nil. The soldiers are placed by the
 // facts that follow it, and an update from before it speaks of the last round.
 receive_map :: proc(g: ^Game, m: ^net.Map) {
-	if m.name != g.map_name {
-		level, ok := sim.level_load_file(g.base, m.name)
-		if !ok {
+	if m.name != g.content.map_name {
+		if !sim.content_load_map(&g.content, m.name) {
 			g.missing = strings.clone(m.name)
 			return
 		}
-		if g.maps_loaded > 0 do sim.level_destroy(&g.level)
-		g.level = level
-		delete(g.map_name)
-		g.map_name = strings.clone(m.name)
-		g.maps_loaded += 1
-		fmt.printfln("map %s: %d polys, %d props", g.map_name, len(g.level.polys), len(g.level.props))
+		fmt.printfln("map %s: %d polys, %d props", g.content.map_name, len(g.content.level.polys), len(g.content.level.props))
 	}
 	w := &g.world
 	w.things, w.bullets, w.ragdolls = {}, {}, {}
@@ -205,11 +183,11 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 receive_fired :: proc(g: ^Game, f: ^net.Fired, update_tick: u32) {
 	if f.seq <= g.seen_shot[f.shooter] do return
 	g.seen_shot[f.shooter] = f.seq
-	index, ok := sim.bullet_spawn(&g.ctx, &g.world, f.pos, f.vel, f.weapon, f.shooter, g.ctx.weapons[f.weapon].damage, &g.events)
+	index, ok := sim.bullet_spawn(&g.content.ctx, &g.world, f.pos, f.vel, f.weapon, f.shooter, g.content.ctx.weapons[f.weapon].damage, &g.events)
 	if !ok do return
 	// signed: the shown tick sits behind the newest word, so this is normally negative
 	since := int(g.view.tick) - int(update_tick) + int(f.age)
-	sim.bullet_fast_forward(&g.ctx, &g.world, index, clamp(since + int(f.lag) + g.my_lag, 0, MAX_FAST_FORWARD), &g.events)
+	sim.bullet_fast_forward(&g.content.ctx, &g.world, index, clamp(since + int(f.lag) + g.my_lag, 0, MAX_FAST_FORWARD), &g.events)
 }
 
 // Where one of my own bullets ended. I flew it myself from the same command, so it is
@@ -235,15 +213,15 @@ receive_fact :: proc(g: ^Game, e: sim.Event) {
 	case sim.Respawn:
 		s := &g.world.soldiers[v.target]
 		if s.active && s.life == v.life do break
-		sim.soldier_spawn(&g.ctx, s, v.pos, v.team, v.primary, v.secondary)
+		sim.soldier_spawn(&g.content.ctx, s, v.pos, v.team, v.primary, v.secondary)
 		s.life = v.life
 		if v.target == g.me do g.my_prev = v.pos
 		else do view_place(&g.view, v.target, v.pos)
 	case sim.Kit_Pickup:
-		if v.player == g.me do sim.kit_give(&g.ctx, &g.world, mine, v.kit)
+		if v.player == g.me do sim.kit_give(&g.content.ctx, &g.world, mine, v.kit)
 	case sim.Weapon_Pickup:
 		if v.player == g.me {
-			mine.weapon = sim.weapon_state(&g.ctx, v.weapon)
+			mine.weapon = sim.weapon_state(&g.content.ctx, v.weapon)
 			mine.weapon.ammo = v.ammo
 		}
 	}
@@ -258,7 +236,7 @@ choose_weapons :: proc(g: ^Game, primary, secondary: sim.Weapon_Id) {
 	g.primary, g.secondary = primary, secondary
 	outbox_loadout(&g.out, primary, secondary)
 	mine := &g.world.soldiers[g.me]
-	if mine.active && !mine.dead && mine.spawn_still do sim.soldier_arm(&g.ctx, mine, primary, secondary)
+	if mine.active && !mine.dead && mine.spawn_still do sim.soldier_arm(&g.content.ctx, mine, primary, secondary)
 }
 
 // Joining the other team: the server moves me if the teams stay even, and says so.
@@ -324,7 +302,7 @@ step_mine :: proc(g: ^Game, in_: ^Input) {
 	if len(g.pending) > PENDING_KEPT do ordered_remove(&g.pending, 0)
 	if !mine.active || mine.dead do return
 	before := g.events.count
-	sim.soldier_step(&g.ctx, &g.world, g.me, cmd, &g.events)
+	sim.soldier_step(&g.content.ctx, &g.world, g.me, cmd, &g.events)
 	for e in g.events.items[before:g.events.count] {
 		if v, fired := e.(sim.Fire); fired && v.player == g.me do g.shots_fired += 1
 	}
@@ -334,9 +312,9 @@ step_mine :: proc(g: ^Game, in_: ^Input) {
 // wound is the server's to give, but the shove of one on me is felt here, where I am
 // stepped. That goes for a bullet that reached me while it was flown on, too.
 step_world :: proc(g: ^Game) {
-	sim.ragdolls_update(&g.ctx, &g.world, &g.events)
-	sim.things_update(&g.ctx, &g.world, &g.events)
-	sim.bullets_update(&g.ctx, &g.world, &g.events)
+	sim.ragdolls_update(&g.content.ctx, &g.world, &g.events)
+	sim.things_update(&g.content.ctx, &g.world, &g.events)
+	sim.bullets_update(&g.content.ctx, &g.world, &g.events)
 	g.world.tick += 1
 	// A hit here is blood and a sound and nothing else, my own included: the wound is the
 	// server's to give and so is the shove, which arrives with my soldier. Shoving myself

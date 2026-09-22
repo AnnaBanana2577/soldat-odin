@@ -58,11 +58,11 @@ app: App
 // Game is. The drawn positions are filled only for a frame that draws.
 scene_of :: proc() -> Scene {
 	return {
-		ctx    = &app.game.ctx,
+		ctx    = &app.game.content.ctx,
 		world  = &app.game.world,
-		level  = &app.game.level,
+		level  = &app.game.content.level,
 		events = &app.game.events,
-		loads  = app.game.maps_loaded,
+		loads  = app.game.content.loads,
 	}
 }
 
@@ -112,7 +112,7 @@ main :: proc() {
 			tick_scene := scene_of()
 			render_tick(&app.render, &tick_scene)
 			hud_tick(&app.hud, &app.game)
-			audio_tick(&app.audio, &app.game.ctx, &app.game.world, &app.game.events, app.game.me, app.camera.pos)
+			audio_tick(&app.audio, &app.game.content.ctx, &app.game.world, &app.game.events, app.game.me, app.camera.pos)
 			input_clear(&app.input)
 		}
 
@@ -151,7 +151,7 @@ run_headless :: proc() {
 
 	for !app.conn.lost && !app.quit {
 		dt := frame_seconds()
-		script_sample(&app.script, &app.input, &app.game.ctx, &app.game.world, app.game.me)
+		script_sample(&app.script, &app.input, &app.game.content.ctx, &app.game.world, app.game.me)
 
 		ticks := ticks_owed(dt)
 		for _ in 0 ..< ticks {
