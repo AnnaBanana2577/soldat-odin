@@ -23,16 +23,48 @@ small:
 So this is not a rewrite. It is four pieces of coupling and one application-shape
 change.
 
-## Stage 0: a baseline to refactor against
+## Stage 0: the baseline, taken
 
-Before touching anything, record what the game measures today, on main:
+Five runs on the refactor branch at ce28f5b, sixty seconds each against six bots:
 
-	odin run build.odin -file -- dev -sv_bots 6 -- -cl_headless -dbg_seconds 60
+	odin run build.odin -file -- dev -no-build -sv_bots 6 -- -cl_headless -dbg_seconds 60
 
-Keep the prediction error, the hits given and taken as agreed, and the bandwidth both
-ways. Those numbers are the regression test for every stage below. The netcode is the
-part of this codebase most easily broken by moving code, and the only thing that will
-say so is a measurement.
+	run   shots seen/ruled   given s/r   taken s/r   pred mean   pred worst   up    down
+	1        33 / 33           0 / 1      18 / 12      0.01         2.38      3.2   29.2
+	2        34 / 34           5 / 6       4 / 4       0.00         0.41      3.3   29.9
+	3        49 / 49           5 / 8      20 / 19      0.02         1.17      3.3   29.4
+	4        39 / 40          18 / 15     35 / 32      0.03         6.56      3.3   32.0
+	5        25 / 25           7 / 7      31 / 26      0.02         0.82      3.2   32.0
+
+The bots are seeded from the clock, so no two runs fight alike. That is why there are
+five, and why the useful output of this stage is not a number but a division: which of
+these can gate a refactor, and which are too loose to mean anything.
+
+**Gate on these.** They barely move, so a change in them is a change in the code:
+
+- *Shots seen against shots ruled*, which agreed exactly in four runs of five and by one
+  in the fifth. The best signal here by some way.
+- *Prediction error, mean*: 0.00 to 0.03 units.
+- *Uplink*: 3.2 to 3.3 KB/s.
+- *The others shown 3 ticks behind*, and *2 commands waiting*, both constant across all
+  five.
+
+**Do not gate on these.** They swing with how much the bots happen to fight:
+
+- *Hits taken, seen against ruled*: 150%, 100%, 105%, 109%, 119%. The client counts more
+  hits on itself than the server rules, which is known and written up under Netcode in
+  todo.md, but the spread is far too wide to read a regression in.
+- *Prediction error, worst*: 0.41 to 6.56, tracking the number of deaths. Run 4 had five
+  of them.
+- *Downlink*: 29.2 to 32.0 KB/s.
+
+So a stage passes if the shots still agree, the mean prediction error stays at or under
+0.03, the uplink stays near 3.2, and the interpolation and queue depth do not move. If
+one of the loose numbers looks wrong, run it five more times before believing it.
+
+Two things worth noting from taking it. The harness lost the ruled line entirely at
+first, which ce28f5b fixes; and the client over-counting hits taken is visible in every
+run, so it is a property of the code and not of a bad afternoon.
 
 ## Stage 1: Match beside World, not inside it
 
@@ -168,10 +200,16 @@ claim. Moving them earlier writes a promise the code has not made yet.
 
 	odin run build.odin -file -- check
 	odin run build.odin -file -- test
-	odin run build.odin -file -- dev -sv_bots 6 -- -cl_headless -dbg_seconds 60
+	odin run build.odin -file -- dev -no-build -sv_bots 6 -- -cl_headless -dbg_seconds 60
 
-The third is the one that matters. If the prediction error or the hits agreed move from
-the Stage 0 baseline, the stage is wrong, however well it reads.
+The third is the one that matters, read against the Stage 0 table and only on the
+numbers that stage found tight enough to read: the shots agreeing, the mean prediction
+error at or under 0.03, the uplink near 3.2 KB/s, three ticks of interpolation and two
+commands waiting.
+
+A stage that moves one of those has broken something, however well it reads. A stage
+that moves only the hits taken, the worst-case error or the downlink has probably moved
+nothing: those swing with the bots, and five more runs will usually say so.
 
 ## Conventions
 
