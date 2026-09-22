@@ -307,12 +307,11 @@ nothing from `gostek`, `bullet_art`, `things_art` or `sparks`.
 So:
 
 	subsystems/gfx/     textures, sprite, camera, map_view, minimap, color_of
-	subsystems/sound/   loading, playing, the listener, volume
 	subsystems/input/   keys and mouse
 	subsystems/net/     the link, the outbox, the simulated line
 
 	game/render/        gostek, bullet_art, things_art, sparks, the Scene
-	game/audio/         which sound belongs to which event
+	game/audio/         whole: the sounds and which event plays them
 	game/               world, match, predict, view, hud
 
 `gfx` draws a map, a sprite, a camera: anything with a level can use it, and the editor
@@ -327,3 +326,35 @@ game's.
 Stage 6 stands either way. Cutting `render` and `audio` free of `game` is what makes
 both halves placeable at all, and it is done. Where the halves go is a folder move, and
 the folders move last.
+
+## How many subsystems, and the test for one
+
+raylib does not write these for us. It hands out primitives; the decisions are ours, and
+the counts say so: `render` names the simulation 133 times against 102 raylib calls,
+`audio` 59 against 23. Where a texture sits in a mod's layout, how a sound is placed by
+distance, how keys become a `sim.Command`: raylib has no opinion on any of it.
+
+But the test for a package is not whether raylib already did the work, and it is not
+only whether the thing is isolable. It is **how many consumers the boundary has**. One
+consumer is a filing decision. Two is an interface.
+
+	                lines   rl.   sim.   consumers
+	render           1649   102    133   game, editor
+	audio             534    23     59   game
+	input              86     4     18   game
+	connection        145     0      0   game
+
+So two subsystems, not four:
+
+- **`gfx`** earns it: 607 lines of textures, sprite, camera, map_view, minimap and
+  `color_of`, wanted by the editor and the running game alike. Two consumers is what
+  made splitting `render` real rather than tidy.
+- **`net`** earns it: the link and the simulated line now, the outbox after Stage 3.
+  No raylib, no simulation, pure transport.
+- **`input`** keeps the package it already has, at 86 lines and one consumer. Not worth
+  defending, not worth moving either.
+- **`sound` is not made.** `audio` is 534 lines with one consumer, and the generic half
+  of it is perhaps a hundred: loading, playing, placing by distance. The editor is what
+  justified splitting `render`, because it draws maps. Nothing else in this codebase
+  makes a sound. `audio` stays whole under `game/` until something does, and if the
+  editor ever previews one, revisit it then.
