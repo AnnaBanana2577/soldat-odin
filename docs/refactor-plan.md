@@ -113,10 +113,10 @@ nothing.
 
 ## Order, and why
 
-1, 2 and 3 are the shared core and go first: they are what the client and the server
-both sit on, and each one makes the next smaller. 4 and 5 are the client's shape and
-depend on 3 having emptied the `Game` structs.
-
+Stage 6 first, though it is numbered last: it is self-contained, changes no protocol,
+and every folder move afterwards assumes it. Then 1, 2 and 3, the shared core, each one
+making the next smaller. Then 4 and 5, the client's shape, which need 3 to have emptied
+the `Game` structs first. The folders move last, when the imports already obey them.
 ## The gate on every stage
 
 	odin run build.odin -file -- check
@@ -171,25 +171,30 @@ above would be a subsystem importing the layer above it. The fix is small: both 
 Do this before moving any folders. Moving them first would encode a layering the imports
 do not obey.
 
-## The HUD, and a cycle refactor.md does not see
+## The HUD lives under game/
 
-refactor.md revises itself to put the HUD inside `Client_Game`, on the grounds that the
-HUD is the running game's and the server must never know it exists. That reasoning is
-right, and in Odin it does not survive contact with the package system: the HUD calls
-*into* the game (`choose_team`, `vote_yes`, `ask_map`, `say`, and `game.Game` itself 29
-times), so `game` owning `hud` means each imports the other.
+Decided: the HUD is the running game's, not a subsystem. It sits under `game/`, and the
+server never learns it exists.
 
-Three ways out, in the order I would take them:
+Nesting the folder does not by itself settle the imports. `client/game/hud/` is still
+its own package, so if `Client_Game` holds a `Hud` field then `game` imports `hud` while
+`hud` imports `game` (`choose_team`, `vote_yes`, `ask_map`, `say`, and `game.Game` in
+twenty-nine places). A directory inside another is not an exemption from that.
 
-1. **One package.** `client/game/` holds the world, the match, the prediction, the
-   camera and the HUD, as files with prefixed procedures: `hud_draw`, `view_advance`,
-   `game_tick`. This is how `shared/sim` already works, it is what the `structname_`
-   convention asks for, and the cycle simply stops existing. The cost is that `hud` and
-   `game` can no longer hide from each other behind `#+private`.
-2. **The HUD stays a sibling** and `Client` owns it, which is refactor.md's position
-   before it revised itself. No cycle, and the HUD is still only ever a reader plus a
-   few actions.
-3. **Invert the calls:** the HUD returns intents and the game applies them. Cleanest on
-   paper, most code for the least gain.
+So there are two shapes, and the choice is about packages, not folders:
 
-I would take 1. It follows from the conventions above rather than fighting them.
+**One package.** `client/game/` is a single package whose files include `hud.odin`,
+`kill_feed.odin`, `scoreboard.odin` beside `world.odin` and `predict.odin`, with
+procedures named for what they act on: `hud_draw`, `view_advance`, `game_tick`. The
+cycle cannot arise, `Client_Game` owns its HUD outright, and it is how `shared/sim`
+already reads. The cost is that the HUD and the rest of the game stop being able to hide
+from each other behind `#+private`.
+
+**Two packages, one direction.** `client/game/hud/` stays its own package and keeps
+importing `game`, but `Client` owns the `Hud` rather than `Client_Game`. The folder
+still says the HUD belongs to the game; the imports still point one way. The cost is
+that ownership and layout disagree, which is the thing refactor.md revised itself to
+avoid.
+
+Taking the first. It follows from the naming convention rather than fighting it, and the
+`#+private` boundary between the HUD and the game is worth less than the ownership is.
