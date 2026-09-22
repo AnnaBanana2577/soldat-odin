@@ -44,7 +44,7 @@ receive_vote :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Vote) {
 	}
 	switch m.kind {
 	case .Kick:
-		if m.target >= sim.MAX_PLAYERS || !g.clients[m.target].connected || m.target == slot do return
+		if m.target >= sim.MAX_PLAYERS || !g.wire.clients[m.target].connected || m.target == slot do return
 	case .Map:
 		if map_index(g, net.text_string(&m.name)) < 0 {
 			server_says(g, host, slot, fmt.tprintf("no map here is called %s", net.text_string(&m.name)))
@@ -70,9 +70,9 @@ start_vote :: proc(g: ^Game, host: ^Host, starter: u8, kind: net.Vote_Kind, targ
 		cooldown = v.cooldown,
 	}
 	if starter < sim.MAX_PLAYERS do v.cooldown[starter] = VOTE_COOLDOWN
-	about := kind == .Kick ? net.text_string(&g.clients[target].name) : net.text_string(&v.name)
+	about := kind == .Kick ? net.text_string(&g.wire.clients[target].name) : net.text_string(&v.name)
 	server_says(g, host, EVERYONE, fmt.tprintf("%s called a vote to %s %s",
-		net.text_string(&g.clients[starter].name), kind == .Kick ? "kick" : "play", about))
+		net.text_string(&g.wire.clients[starter].name), kind == .Kick ? "kick" : "play", about))
 	send_vote(g, host)
 }
 
@@ -91,8 +91,8 @@ pass_vote :: proc(g: ^Game, host: ^Host) {
 	v := &g.vote
 	switch v.kind {
 	case .Kick:
-		if v.target < sim.MAX_PLAYERS && g.clients[v.target].connected {
-			server_says(g, host, EVERYONE, fmt.tprintf("%s was voted out", net.text_string(&g.clients[v.target].name)))
+		if v.target < sim.MAX_PLAYERS && g.wire.clients[v.target].connected {
+			server_says(g, host, EVERYONE, fmt.tprintf("%s was voted out", net.text_string(&g.wire.clients[v.target].name)))
 			kick(g, host, v.target)
 		}
 	case .Map:
@@ -125,13 +125,13 @@ vote_tick :: proc(g: ^Game, host: ^Host) {
 
 // Whoever is playing and could vote: the bots never do.
 voters :: proc(g: ^Game) -> (count: int) {
-	for &c in g.clients do if c.connected && !c.bot do count += 1
+	for &c in g.wire.clients do if c.connected && !c.bot do count += 1
 	return
 }
 
 send_vote :: proc(g: ^Game, host: ^Host) {
 	v := &g.vote
-	g.outgoing = net.Vote_State{
+	g.wire.outgoing = net.Vote_State{
 		kind = v.kind, active = v.active, target = v.target, name = v.name,
 		starter = v.starter, reason = v.reason, ticks = v.ticks,
 		votes = u8(min(v.votes, 255)), needed = u8(min(needed(g), 255)),
@@ -148,7 +148,7 @@ needed :: proc(g: ^Game) -> int {
 // Shown the door: a bot is simply taken out, a player is disconnected and leaves the
 // ordinary way when ENet says so.
 kick :: proc(g: ^Game, host: ^Host, slot: u8) {
-	if g.clients[slot].bot {
+	if g.wire.clients[slot].bot {
 		leave(g, host, slot)
 		send_roster(g, host)
 		return
@@ -167,6 +167,6 @@ receive_map_query :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Map_Query) {
 	count := len(g.rules.maps)
 	if count == 0 do return
 	at := int(m.index) % count
-	g.outgoing = net.Map_Name{index = u16(at), count = u16(count), name = net.name_make(g.rules.maps[at])}
+	g.wire.outgoing = net.Map_Name{index = u16(at), count = u16(count), name = net.name_make(g.rules.maps[at])}
 	send_message(g, host, slot)
 }

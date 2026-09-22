@@ -37,17 +37,10 @@ Game :: struct {
 	rules:      Rules,
 	map_index:  int,         // of the one being played, in rules.maps
 	events:     sim.Events,  // this tick's
-	clients:    [sim.MAX_PLAYERS]Client,
 	bots:       sim.Bots,           // the brains of the slots the server plays itself
 	profiles:   []sim.Bot_Profile, // the personality files they are drawn from
 	vote:       Vote,              // what is being voted on, if anything (vote.odin)
-	born:       [dynamic]Born,            // the bullets born lately, each told a few updates running
-	ends:       [dynamic]Ended,           // and where the clients' own ended, told back to them
-	shot_seq:   [sim.MAX_PLAYERS]u32,     // the last number given to each shooter's bullets
-	things_sent: [sim.MAX_THINGS]sim.Thing, // as the clients last heard them
-
-	incoming, outgoing: net.Message, // scratch: an Update is too large for the stack
-	buf: [net.MAX_PACKET]u8,
+	wire:       Wire,        // who is in which slot and what each is owed (sv_wire)
 }
 
 // What the server was started with.
@@ -64,32 +57,6 @@ Rules :: struct {
 	bots_difficulty: int,    // 300 stupid, 100 normal, 10 impossible
 	bots_chat:     bool,     // the bots say what their files give them to say
 	vote_percent:  int,      // of the players who can vote, how many must agree for one to pass
-}
-
-Client :: struct {
-	connected:  bool,
-	name:       net.Name,
-	last_chat:  u32, // the tick it last said something
-	bot:        bool, // played by the server itself (sim/bot.odin): no peer, nothing received or sent
-	queue:      Queue, // what it pressed, and what of that the sim has yet to run
-	lag:        f32,   // how late it sees the world, in ticks, smoothed: told back to it
-	// for the leave line: the hits it gave and took as ruled here, which its own summary
-	// has as it saw them; `judged` sums how far back its shots were ruled
-	shots, hits_given, hits_taken, judged: int,
-}
-
-// Where a client's own bullet ended, kept while it is being told to that client.
-Ended :: struct {
-	owner: u8,
-	end:   net.End,
-	tick:  u32,
-}
-
-// The birth of a bullet, kept while it is being told.
-Born :: struct {
-	fired:      net.Fired,
-	tick:       u32,
-	to_shooter: bool, // the server's own making (a bot's, the map's): its soldier's client has not seen it
 }
 
 
@@ -126,7 +93,7 @@ next_round :: proc(g: ^Game, host: ^Host) {
 	g.map_index = (g.map_index + 1) % len(g.rules.maps)
 	if !map_load(g, g.rules.maps[g.map_index]) do fmt.eprintfln("could not load %s; %s again", g.rules.maps[g.map_index], g.content.map_name)
 	round_start(g)
-	g.outgoing = map_message(g)
+	g.wire.outgoing = map_message(g)
 	send_message(g, host, EVERYONE)
 	for &s, i in g.world.soldiers {
 		if !s.active do continue
@@ -154,8 +121,8 @@ round_start :: proc(g: ^Game) {
 	w.match.friendly_fire = g.rules.friendly_fire
 	w.match.kits_collide = g.rules.kits_collide
 	sim.things_spawn(&g.content.ctx, w)
-	g.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
-	clear(&g.born)
+	g.wire.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
+	clear(&g.wire.born)
 }
 
 // The map and the rules of the match on it. The rules go with it because a client
@@ -193,7 +160,7 @@ tick :: proc(g: ^Game, host: ^Host) {
 step_soldiers :: proc(g: ^Game) {
 	w := &g.world
 	buf: [MAX_CATCH_UP]sim.Command
-	for &c, i in g.clients {
+	for &c, i in g.wire.clients {
 		if !c.connected do continue
 		slot := u8(i)
 		before := g.events.count
@@ -220,12 +187,12 @@ step_soldiers :: proc(g: ^Game) {
 // Every packet since the last tick, in the order it came. Peers that left leave.
 receive :: proc(g: ^Game, host: ^Host) {
 	for p in host_receive(host) {
-		if !net.decode(p.data, &g.incoming) do continue
+		if !net.decode(p.data, &g.wire.incoming) do continue
 		if p.slot == NO_SLOT {
-			if m, is_hello := g.incoming.(net.Hello); is_hello do join(g, host, p.peer, m)
+			if m, is_hello := g.wire.incoming.(net.Hello); is_hello do join(g, host, p.peer, m)
 			continue
 		}
-		#partial switch &m in g.incoming {
+		#partial switch &m in g.wire.incoming {
 		case net.Input: receive_input(g, p.slot, &m)
 		case net.Act:   receive_act(g, host, p.slot, m)
 		case net.Chat:  receive_chat(g, host, p.slot, &m)
@@ -240,7 +207,7 @@ receive :: proc(g: ^Game, host: ^Host) {
 // between the tick it says it is showing the others at and the tick its packet lands in.
 // What it fires is judged that far back (sim/history.odin).
 receive_input :: proc(g: ^Game, slot: u8, m: ^net.Input) {
-	c := &g.clients[slot]
+	c := &g.wire.clients[slot]
 	tick := g.world.tick
 	behind := tick > m.view_tick ? tick - m.view_tick : 0
 	c.lag += (f32(behind) - c.lag) * LAG_SMOOTHING
@@ -264,24 +231,24 @@ join_team :: proc(g: ^Game, host: ^Host, slot: u8, team: sim.Team) {
 	sim.flag_let_go(&g.world, slot)
 	s.team, s.dead = team, false
 	sim.soldier_respawn(&g.content.ctx, &g.world, slot, &g.events)
-	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", net.text_string(&g.clients[slot].name), team))
+	server_says(g, host, EVERYONE, fmt.tprintf("%s has joined %v team", net.text_string(&g.wire.clients[slot].name), team))
 }
 
 // A line from a client, to everyone or to its team, half a second at least after its
 // last. Who said it is the server's to say.
 receive_chat :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Chat) {
-	c := &g.clients[slot]
+	c := &g.wire.clients[slot]
 	if m.text.len == 0 || (c.last_chat != 0 && g.world.tick - c.last_chat < CHAT_EVERY) do return
 	c.last_chat = g.world.tick
 	m.slot = slot
 	fmt.printfln("%s[%s] %s", m.team ? "(TEAM) " : "", net.text_string(&c.name), net.text_string(&m.text))
-	g.outgoing = m^
+	g.wire.outgoing = m^
 	if !m.team {
 		send_message(g, host, EVERYONE)
 		return
 	}
 	team := g.world.soldiers[slot].team
-	for &o, i in g.clients {
+	for &o, i in g.wire.clients {
 		if o.connected && !o.bot && g.world.soldiers[i].team == team do send_message(g, host, u8(i))
 	}
 }
@@ -290,7 +257,7 @@ receive_chat :: proc(g: ^Game, host: ^Host, slot: u8, m: ^net.Chat) {
 server_says :: proc(g: ^Game, host: ^Host, to: u8, line: string) {
 	chat := net.Chat{slot = SERVER_SLOT}
 	net.text_set(&chat.text, line)
-	g.outgoing = chat
+	g.wire.outgoing = chat
 	send_message(g, host, to)
 }
 
@@ -320,9 +287,9 @@ receive_act :: proc(g: ^Game, host: ^Host, slot: u8, m: net.Act) {
 // the lag it is judged by.
 tell_born :: proc(g: ^Game, index: int, to_shooter: bool) {
 	b := &g.world.bullets[index]
-	g.shot_seq[b.owner] += 1
-	fired := net.Fired{shooter = b.owner, seq = g.shot_seq[b.owner], lag = b.lag, weapon = b.weapon, pos = b.pos, vel = b.vel}
-	append(&g.born, Born{fired = fired, tick = g.world.tick, to_shooter = to_shooter})
+	g.wire.shot_seq[b.owner] += 1
+	fired := net.Fired{shooter = b.owner, seq = g.wire.shot_seq[b.owner], lag = b.lag, weapon = b.weapon, pos = b.pos, vel = b.vel}
+	append(&g.wire.born, Born{fired = fired, tick = g.world.tick, to_shooter = to_shooter})
 }
 
 // ---- joining and leaving ----
@@ -332,16 +299,16 @@ tell_born :: proc(g: ^Game, index: int, to_shooter: bool) {
 join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 	slot := m.version == net.VERSION ? free_slot(g) : NO_SLOT
 	if slot == NO_SLOT {
-		g.outgoing = net.Denied{reason = m.version != net.VERSION ? "wrong version" : "server full"}
-		if size, ok := net.encode(g.buf[:], &g.outgoing); ok do peer_send(peer, g.buf[:size], reliable = true)
+		g.wire.outgoing = net.Denied{reason = m.version != net.VERSION ? "wrong version" : "server full"}
+		if size, ok := net.encode(g.wire.buf[:], &g.wire.outgoing); ok do peer_send(peer, g.wire.buf[:size], reliable = true)
 		return
 	}
 	host_bind(host, slot, peer)
-	g.clients[slot] = {connected = true, name = net.name_make(m.name)}
+	g.wire.clients[slot] = {connected = true, name = net.name_make(m.name)}
 	bot_friends(g) // one of them may have named this player as its friend
-	g.outgoing = net.Welcome{slot = slot}
+	g.wire.outgoing = net.Welcome{slot = slot}
 	send_message(g, host, slot)
-	g.outgoing = map_message(g)
+	g.wire.outgoing = map_message(g)
 	send_message(g, host, slot)
 	things: net.Things
 	for &t, i in g.world.things {
@@ -366,14 +333,14 @@ add_bot :: proc(g: ^Game) {
 		if !name_taken(g, prof.name) do break
 	}
 	sim.bot_init(&g.bots[slot], prof, seed, g.rules.bots_difficulty, g.rules.bots_chat)
-	g.clients[slot] = {connected = true, bot = true, name = net.name_make(prof.name)}
+	g.wire.clients[slot] = {connected = true, bot = true, name = net.name_make(prof.name)}
 	bot_friends(g)
 	team := spawn_newcomer(g, slot)
 	fmt.printfln("%s joined as slot %d on %v", prof.name, slot, team)
 }
 
 name_taken :: proc(g: ^Game, name: string) -> bool {
-	for &c in g.clients do if c.connected && net.text_string(&c.name) == name do return true
+	for &c in g.wire.clients do if c.connected && net.text_string(&c.name) == name do return true
 	return false
 }
 
@@ -384,7 +351,7 @@ bot_friends :: proc(g: ^Game) {
 		if !b.playing do continue
 		b.friend = sim.NOBODY
 		if b.prof.friend == "" do continue
-		for &c, k in g.clients {
+		for &c, k in g.wire.clients {
 			if c.connected && k != i && net.text_string(&c.name) == b.prof.friend do b.friend = u8(k)
 		}
 	}
@@ -397,19 +364,19 @@ bot_chat :: proc(g: ^Game, host: ^Host) {
 		if !b.playing do continue
 		line := b.says
 		if b.taunts != sim.NOBODY {
-			if b.taunts < sim.MAX_PLAYERS && g.clients[b.taunts].connected {
-				line = fmt.tprintf("Die %s!", net.text_string(&g.clients[b.taunts].name))
+			if b.taunts < sim.MAX_PLAYERS && g.wire.clients[b.taunts].connected {
+				line = fmt.tprintf("Die %s!", net.text_string(&g.wire.clients[b.taunts].name))
 			}
 			b.taunts = sim.NOBODY
 		}
 		b.says = ""
-		c := &g.clients[i]
+		c := &g.wire.clients[i]
 		if line == "" || (c.last_chat != 0 && g.world.tick - c.last_chat < CHAT_EVERY) do continue
 		c.last_chat = g.world.tick
 		chat := net.Chat{slot = u8(i)}
 		net.text_set(&chat.text, line)
 		fmt.printfln("[%s] %s", net.text_string(&c.name), line)
-		g.outgoing = chat
+		g.wire.outgoing = chat
 		send_message(g, host, EVERYONE)
 	}
 }
@@ -417,20 +384,20 @@ bot_chat :: proc(g: ^Game, host: ^Host) {
 // Who plays in which slot, to everyone, whenever someone joins. It is small.
 send_roster :: proc(g: ^Game, host: ^Host) {
 	roster: net.Roster
-	for &c, i in g.clients {
+	for &c, i in g.wire.clients {
 		if !c.connected do continue
 		roster.slots[roster.count] = u8(i)
 		roster.names[roster.count] = c.name
 		if c.bot do roster.bots |= 1 << u32(i)
 		roster.count += 1
 	}
-	g.outgoing = roster
+	g.wire.outgoing = roster
 	send_message(g, host, EVERYONE)
 }
 
 // The first slot nobody plays, or NO_SLOT when the server is full.
 free_slot :: proc(g: ^Game) -> u8 {
-	for &c, i in g.clients do if !c.connected do return u8(i)
+	for &c, i in g.wire.clients do if !c.connected do return u8(i)
 	return NO_SLOT
 }
 
@@ -449,7 +416,7 @@ spawn_newcomer :: proc(g: ^Game, slot: u8) -> sim.Team {
 }
 
 leave :: proc(g: ^Game, host: ^Host, slot: u8) {
-	c := &g.clients[slot]
+	c := &g.wire.clients[slot]
 	server_says(g, host, EVERYONE, fmt.tprintf("%s has left the game", net.text_string(&c.name)))
 	fmt.printfln("slot %d left: %d shots, %d hits given and %d taken as ruled here, judged %.0f ms back on average",
 		slot, c.shots, c.hits_given, c.hits_taken, f64(c.judged) / f64(max(c.shots, 1)) * 1000 / sim.TICK_RATE)
@@ -477,13 +444,13 @@ step_world :: proc(g: ^Game) {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.content.ctx, w, hit, &g.events)
 	}
 	for e in sim.events_slice(&g.events) {
-		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && !g.clients[v.owner].bot {
-			append(&g.ends, Ended{owner = v.owner, end = {shot = v.shot, pos = v.pos, impact = v.impact}, tick = g.world.tick})
+		if v, gone := e.(sim.Bullet_End); gone && g.wire.clients[v.owner].connected && !g.wire.clients[v.owner].bot {
+			append(&g.wire.ends, Ended{owner = v.owner, end = {shot = v.shot, pos = v.pos, impact = v.impact}, tick = g.world.tick})
 		}
 		sim.bot_event(&g.bots, w, e)
 		if v, wounded := e.(sim.Damage); wounded && v.attacker != v.target {
-			g.clients[v.attacker].hits_given += 1
-			g.clients[v.target].hits_taken += 1
+			g.wire.clients[v.attacker].hits_given += 1
+			g.wire.clients[v.target].hits_taken += 1
 		}
 	}
 }
@@ -494,8 +461,8 @@ send :: proc(g: ^Game, host: ^Host) {
 	send_things(g, host)
 	send_facts(g, host)
 	send_updates(g, host)
-	for len(g.born) > 0 && g.world.tick - g.born[0].tick >= BORN_TOLD do ordered_remove(&g.born, 0)
-	for len(g.ends) > 0 && g.world.tick - g.ends[0].tick >= BORN_TOLD do ordered_remove(&g.ends, 0)
+	for len(g.wire.born) > 0 && g.world.tick - g.wire.born[0].tick >= BORN_TOLD do ordered_remove(&g.wire.born, 0)
+	for len(g.wire.ends) > 0 && g.world.tick - g.wire.ends[0].tick >= BORN_TOLD do ordered_remove(&g.wire.ends, 0)
 	host_flush(host)
 }
 
@@ -505,7 +472,7 @@ send :: proc(g: ^Game, host: ^Host) {
 send_things :: proc(g: ^Game, host: ^Host) {
 	things: net.Things
 	for &t, i in g.world.things {
-		last := &g.things_sent[i]
+		last := &g.wire.things_sent[i]
 		if t.style == last.style && t.holder == last.holder && t.static == last.static do continue
 		things_add(g, host, EVERYONE, &things, i, &t)
 		last^ = t
@@ -522,7 +489,7 @@ things_add :: proc(g: ^Game, host: ^Host, to: u8, m: ^net.Things, index: int, t:
 
 things_flush :: proc(g: ^Game, host: ^Host, to: u8, m: ^net.Things) {
 	if m.count == 0 do return
-	g.outgoing = m^
+	g.wire.outgoing = m^
 	send_message(g, host, to)
 	m.count = 0
 }
@@ -535,13 +502,13 @@ send_facts :: proc(g: ^Game, host: ^Host) {
 		facts.events[facts.count] = e
 		facts.count += 1
 		if facts.count == net.MAX_FACTS_PER_MSG {
-			g.outgoing = facts
+			g.wire.outgoing = facts
 			send_message(g, host, EVERYONE)
 			facts.count = 0
 		}
 	}
 	if facts.count > 0 {
-		g.outgoing = facts
+		g.wire.outgoing = facts
 		send_message(g, host, EVERYONE)
 	}
 }
@@ -557,17 +524,17 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 	for &s, i in w.soldiers {
 		if !s.active do continue
 		active |= 1 << u32(i)
-		lags[i] = u8(min(g.clients[i].lag + 0.5, 255))
+		lags[i] = u8(min(g.wire.clients[i].lag + 0.5, 255))
 	}
 	every := g.rules.update_others // a client hears of its own every tick: what it replays from
 	turn := w.tick / every
 	others := w.tick % every == 0
-	for &c, ri in g.clients {
+	for &c, ri in g.wire.clients {
 		if !c.connected || c.bot do continue
 		me := &w.soldiers[ri]
 		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
-		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, match = w.match^, active = active, lags = lags}
-		m := &g.outgoing.(net.Update)
+		g.wire.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, match = w.match^, active = active, lags = lags}
+		m := &g.wire.outgoing.(net.Update)
 		for &s, i in w.soldiers {
 			if !s.active do continue
 			mine := i == ri
@@ -577,7 +544,7 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 			m.entries[m.entry_count] = {slot = u8(i), has_owned = !s.dead, has_rest = mine, soldier = s}
 			m.entry_count += 1
 		}
-		for &b in g.born {
+		for &b in g.wire.born {
 			if m.fired_count == net.MAX_SHOTS_PER_UPDATE do break
 			if int(b.fired.shooter) == ri && !b.to_shooter do continue
 			if watching && !could_reach(me.pos, b.fired.pos, b.fired.vel) do continue
@@ -585,7 +552,7 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 			m.fired[m.fired_count].age = u8(w.tick - b.tick)
 			m.fired_count += 1
 		}
-		for &e in g.ends {
+		for &e in g.wire.ends {
 			if int(e.owner) != ri || m.end_count == net.MAX_ENDS_PER_UPDATE do continue
 			m.ends[m.end_count] = e.end
 			m.end_count += 1
@@ -609,14 +576,14 @@ could_reach :: proc(eye, pos, vel: sim.Vec2) -> bool {
 
 EVERYONE :: NO_SLOT
 
-// g.outgoing, on the delivery its kind has, to a slot or to EVERYONE.
+// g.wire.outgoing, on the delivery its kind has, to a slot or to EVERYONE.
 send_message :: proc(g: ^Game, host: ^Host, to: u8) {
-	size, ok := net.encode(g.buf[:], &g.outgoing)
+	size, ok := net.encode(g.wire.buf[:], &g.wire.outgoing)
 	if !ok {
-		fmt.eprintln("a message did not fit its packet:", net.message_kind(&g.outgoing))
+		fmt.eprintln("a message did not fit its packet:", net.message_kind(&g.wire.outgoing))
 		return
 	}
-	reliable := net.RELIABLE[net.message_kind(&g.outgoing)]
-	if to == EVERYONE do host_broadcast(host, g.buf[:size], reliable)
-	else do host_send(host, to, g.buf[:size], reliable)
+	reliable := net.RELIABLE[net.message_kind(&g.wire.outgoing)]
+	if to == EVERYONE do host_broadcast(host, g.wire.buf[:size], reliable)
+	else do host_send(host, to, g.wire.buf[:size], reliable)
 }
