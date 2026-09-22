@@ -133,7 +133,8 @@ what you see while making a thing is what the game will show.
   the slope friction by stance, jet fuel regeneration.
 - The gostek draws from the animation pose: every body part pinned between its two
   skeleton points, mirrored or flipped for facing left, team colours, the held and
-  slung weapons, the jet feet, the muzzle flash.
+  slung weapons, the jet feet, the muzzle flash, the grenades on the belt, the vest
+  and the rambo badge a bow puts on the chest.
 - Weapons: Soldat 1.7.1's stats built in, firing with the spread, bink and movement
   inaccuracy, the recoil animation by weapon, the shotgun's pellets, the Eagles' pair,
   the minigun's and LAW's wind-up, semi-automatics, reloads (clip out and in, shell

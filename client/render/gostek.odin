@@ -20,7 +20,8 @@ import "../../shared/sim"
 Gostek_Color :: enum u8 { None, Main, Pants, Skin, Hair, Head_Blood }
 
 Gostek_Part :: struct {
-	file:   string, // base name under gostek-gfx
+	file:   string, // base name under `dir`
+	dir:    string, // the folder it is read from; gostek-gfx when this is empty
 	p1, p2: int,    // skeleton points, the original's 1-based numbering
 	cx, cy: f32,    // anchor within the sprite, 0..1
 	flex:   f32,    // if > 0, stretch along the part's length
@@ -31,6 +32,9 @@ Gostek_Part :: struct {
 	foot:   bool,   // hidden while jetting
 	blood:  bool,   // a wound over the part before it, shown as health runs low
 	grip:   bool,   // the held weapon goes just before it, so the arm wraps the grip
+	vest:   bool,   // drawn while the vest holds
+	badge:  bool,   // drawn while a bow is in the hands
+	nade:   int,    // the nth grenade on the belt, 1 to 5; drawn while that many are carried
 }
 
 GOSTEK_PARTS := [?]Gostek_Part{
@@ -52,11 +56,20 @@ GOSTEK_PARTS := [?]Gostek_Part{
 	{file = "noga",        p1 = 4,  p2 = 1,  cx = 0.15, cy = 0.55, flip = true, team = true, color = .Pants},
 	{file = "ranny/noga",  p1 = 4,  p2 = 1,  cx = 0.15, cy = 0.55, flip = true, team = true, blood = true},
 	{file = "klata",       p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, color = .Main},
+	{file = "kamizelka",   p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, vest = true},
 	{file = "ranny/klata", p1 = 10, p2 = 11, cx = 0.1,  cy = 0.3,  flip = true, team = true, blood = true},
 	{file = "biodro",      p1 = 5,  p2 = 6,  cx = 0.25, cy = 0.6,  flip = true, team = true, color = .Main},
 	{file = "ranny/biodro", p1 = 5, p2 = 6,  cx = 0.25, cy = 0.6,  flip = true, team = true, blood = true},
 	{file = "morda",       p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Skin},
 	{file = "ranny/morda", p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, color = .Head_Blood, blood = true},
+	{file = "badge",       p1 = 9,  p2 = 12, cx = 0,    cy = 0.5,  flip = true, team = true, badge = true},
+	// The belt, between the hips. The original's data pins all five to the same spot,
+	// so a soldier carrying more shows no more; the count is still the original's.
+	{file = "frag-grenade", dir = "weapons-gfx", p1 = 5, p2 = 6, cx = 0.5, cy = 0.1, nade = 1},
+	{file = "frag-grenade", dir = "weapons-gfx", p1 = 5, p2 = 6, cx = 0.5, cy = 0.1, nade = 2},
+	{file = "frag-grenade", dir = "weapons-gfx", p1 = 5, p2 = 6, cx = 0.5, cy = 0.1, nade = 3},
+	{file = "frag-grenade", dir = "weapons-gfx", p1 = 5, p2 = 6, cx = 0.5, cy = 0.1, nade = 4},
+	{file = "frag-grenade", dir = "weapons-gfx", p1 = 5, p2 = 6, cx = 0.5, cy = 0.1, nade = 5},
 	{file = "ramie",       p1 = 10, p2 = 13, cx = 0,    cy = 0.6,  flip = true, team = true, color = .Main, grip = true},
 	{file = "ranny/ramie", p1 = 10, p2 = 13, cx = -0.1, cy = 0.5,  flip = true, team = true, blood = true},
 	{file = "reka",        p1 = 13, p2 = 16, cx = 0,    cy = 0.6,  flex = 5, team = true, color = .Main},
@@ -131,7 +144,7 @@ gostek_load :: proc(g: ^Gostek, base: string) {
 					if !part.flip do continue // no mirrored image: the quad flips instead
 					name = strings.concatenate({part.file, "2"}, context.temp_allocator)
 				}
-				dir := team == 1 && part.team ? "gostek-gfx/team2" : "gostek-gfx"
+				dir := part.dir != "" ? part.dir : (team == 1 && part.team ? "gostek-gfx/team2" : "gostek-gfx")
 				file := strings.concatenate({name, ".png"}, context.temp_allocator)
 				path, _ := filepath.join({base, dir, file}, context.temp_allocator)
 				if s, ok := sprite_load(path); ok do g.parts[i][team][mirrored] = s
@@ -165,11 +178,18 @@ gostek_draw :: proc(g: ^Gostek, s: ^sim.Soldier, pose: ^sim.Pose, corpse: bool) 
 	}
 
 	bleeding := blood_alpha(s)
+	// The grenades on the belt: what is carried, less the one already in the hand while
+	// a throw runs, and never more of them than the belt holds.
+	carried := int(s.grenades) - (s.body.id == .Throw ? 1 : 0)
+	bow := s.weapon.id == .Bow || s.weapon.id == .Bow2
 	for part, i in GOSTEK_PARTS {
 		if part.grip do draw_held_weapon(g, &pose, s, facing_left)
 		if part.jets && !jetting do continue
 		if part.foot && jetting do continue
 		if part.blood && bleeding == 0 do continue
+		if part.vest && s.vest <= 0 do continue
+		if part.badge && !bow do continue
+		if part.nade > 0 && part.nade > carried do continue // a body keeps its belt, as the original leaves it
 
 		mirrored := facing_left && part.flip
 		sprite := g.parts[i][part.team ? team : 0][mirrored ? 1 : 0]
@@ -190,6 +210,7 @@ gostek_draw :: proc(g: ^Gostek, s: ^sim.Soldier, pose: ^sim.Pose, corpse: bool) 
 		if part.flex > 0 do sx = min(1.5, sim.vec2_length(along) / part.flex)
 		tint := gostek_color(part.color, s)
 		if part.blood do tint.a = bleeding
+		if part.nade > 0 do tint.a = u8(0.75 * f32(tint.a)) // ALPHA_NADES
 		draw_sprite(sprite, p1 + {0, 1}, {cx * sprite.width, cy * sprite.height}, {sx, sy}, angle, tint)
 	}
 	rlgl.SetTexture(0)

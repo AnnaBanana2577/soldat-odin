@@ -124,14 +124,15 @@ what is in; this is the rest of it.
   what it is (a join, a vote, a death, the server speaking) and keeps the server's
   messages apart from the kills.
 - The gostek draws the fifteen parts the original has visible from the start, its
-  wounds and its jet feet, and none of the ones the original adds by condition: the
-  grenades on the belt (up to five, pinned between skeleton points 5 and 6, one off
-  while a throw runs), the hair in its four styles, the helmet or hat and the grabbed
-  one that comes off in the wipe and take-off antics, the vest, the cigar, the chains
-  and their pendants and the rambo badge. The grenades are the one a plain soldier in a
-  plain game is missing: everyone spawns holding one. The rest wait on the roster
-  carrying what a player looks like, which is the same wire change as the colours
-  below.
+  wounds and its jet feet, and of the ones the original adds by condition it now has
+  the grenades on the belt, the vest and the rambo badge. Still missing: the hair in
+  its four styles, and the helmet or hat with the grabbed one that comes off in the
+  wipe and take-off antics, all of which wait on the roster carrying what a player
+  looks like (the same wire change as the colours below); the chains and their
+  pendants, which want it too; and the cigar, which wants a lit one on the soldier
+  (the original's HasCigar, set by the cigar and match antics) before there is
+  anything to draw. The belt is frag grenades only, this game having no cluster bonus
+  to fill it with the other kind.
 - The names of the players and their colours: the roster carries names only, so the
   shirts on the scoreboard, the kill feed and the gostek are the team's colours and not
   each player's own.
