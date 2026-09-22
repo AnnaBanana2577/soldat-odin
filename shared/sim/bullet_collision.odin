@@ -377,7 +377,7 @@ thing_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, nearest: f32,
 	for &t, ti in w.things {
 		if t.style == .None do continue
 		is_flag := t.style == .Alpha_Flag || t.style == .Bravo_Flag
-		if !is_flag && !w.round.kits_collide do continue
+		if !is_flag && !w.match.kits_collide do continue
 		if t.holder == b.owner + 1 do continue // not the flag you carry
 
 		part := -1

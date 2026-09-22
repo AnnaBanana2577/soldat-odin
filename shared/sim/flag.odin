@@ -87,7 +87,7 @@ flag_capture :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Ev
 		if u8(i) == index || !is_flag(other.style) || other.holder != 0 || !other.in_base do continue
 		if vec2_length(t.pos[0] - other.pos[0]) < TOUCHDOWN_RADIUS {
 			holder.flags += 1
-			w.round.scores[holder.team] += 1
+			w.match.scores[holder.team] += 1
 			emit(events, Flag_Score{player = t.holder - 1, flag = t.style, pos = t.pos[0]})
 			flag_respawn(ctx, w, t)
 			return

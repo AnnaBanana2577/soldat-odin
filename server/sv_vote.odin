@@ -99,7 +99,7 @@ pass_vote :: proc(g: ^Game, host: ^Host) {
 		if at := map_index(g, net.text_string(&v.name)); at >= 0 {
 			server_says(g, host, EVERYONE, fmt.tprintf("%s was voted in", net.text_string(&v.name)))
 			g.map_index = at - 1 // next_round takes the one after this
-			sim.round_end(&g.world, &g.events)
+			sim.match_end(&g.world, &g.events)
 		}
 	}
 	stop_vote(g, host)

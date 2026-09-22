@@ -10,7 +10,7 @@ damage_apply :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 	s := &w.soldiers[hit.target]
 	if !s.active do return
 	attacker := &w.soldiers[hit.shooter]
-	if !w.round.friendly_fire && s.team != .None && s.team == attacker.team && hit.target != hit.shooter do return
+	if !w.match.friendly_fire && s.team != .None && s.team == attacker.team && hit.target != hit.shooter do return
 	if s.bonus == .Flame_God do return
 
 	// HealthHit on a corpse: the wound lands and nothing else does. No knockback, no
@@ -45,7 +45,7 @@ die :: proc(ctx: ^Context, w: ^World, hit: Hit, events: ^Events) {
 	s.weapon = weapon_state(ctx, .None)
 	s.dead = true
 	s.vel = {}
-	s.respawn_counter = w.round.respawn_time
+	s.respawn_counter = w.match.respawn_time
 	s.deaths += 1
 	if hit.shooter != hit.target do w.soldiers[hit.shooter].kills += 1
 	else if s.kills > 0 do s.kills -= 1

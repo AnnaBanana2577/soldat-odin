@@ -180,7 +180,7 @@ hud_tick :: proc(h: ^Hud, g: ^Game) {
 		h.team_was = mine.team
 	}
 
-	ended := g.world.round.state == .Ended
+	ended := g.match.state == .Ended
 	if ended && !h.was_ended do h.menu.open, h.team.open = false, false
 	if !ended && h.was_ended do menu_open(&h.menu, by_hand = false)
 	h.was_ended = ended
@@ -197,7 +197,7 @@ hud_draw :: proc(h: ^Hud, g: ^Game, r: ^Render, camera: ^Camera, cursor: sim.Vec
 	mine := &g.world.soldiers[g.me]
 	alive := mine.active && !mine.dead
 	if alive do draw_bars(h, g, sc, mine)
-	ended := g.world.round.state == .Ended
+	ended := g.match.state == .Ended
 	scores := h.scores_shown || ended
 	draw_status(h, g, sc, mine)
 	hud_minimap_draw(h, g, sc, r, camera)
@@ -286,8 +286,8 @@ draw_status :: proc(h: ^Hud, g: ^Game, sc: Screen, mine: ^sim.Soldier) {
 			tint:  rl.Color,
 		}
 		rows := [2]Team_Row{
-			{w.round.scores[.Alpha], {210, 15, 5, 255}},
-			{w.round.scores[.Bravo], {5, 15, 210, 255}},
+			{w.match.scores[.Alpha], {210, 15, 5, 255}},
+			{w.match.scores[.Bravo], {5, 15, 210, 255}},
 		}
 		if rows[1].score > rows[0].score do rows[0], rows[1] = rows[1], rows[0]
 		for r, i in rows do text(h, sc, .Menu, fmt.tprint(r.score), x + 2, 355 + f32(i) * 40, r.tint)
@@ -314,7 +314,7 @@ draw_status :: proc(h: ^Hud, g: ^Game, sc: Screen, mine: ^sim.Soldier) {
 		text(h, sc, .Small, lead, x, 431, {255, 55, 50, 255})
 
 		// What it takes to win, under the two of them.
-		text(h, sc, .Small, fmt.tprint(w.round.score_limit), x, 441, {114, 120, 255, 255})
+		text(h, sc, .Small, fmt.tprint(w.match.score_limit), x, 441, {114, 120, 255, 255})
 	}
 
 	// The bonus in hand and how long is left of it, by the middle of the bars.

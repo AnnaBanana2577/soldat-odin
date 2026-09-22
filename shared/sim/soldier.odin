@@ -161,7 +161,7 @@ soldier_step :: proc(ctx: ^Context, w: ^World, index: u8, cmd: Command, events: 
 
 	// Between rounds nobody moves.
 	s.cmd_seq = cmd.seq
-	s.controls = w.round.state == .Ended ? {} : cmd.buttons
+	s.controls = w.match.state == .Ended ? {} : cmd.buttons
 	if s.controls != {} do s.spawn_still = false
 	s.aim = cmd.aim
 	// suicide is a hit on oneself, applied like any other, and a brutal one
@@ -196,7 +196,7 @@ suicide_hit :: proc(w: ^World, index: u8) -> Hit {
 
 // The server's half of a soldier's tick, whoever moves it: the way back from death and
 // from off the map, the spawn protection, the bonus. Only the world that decides runs
-// this (round_tick); everyone else hears the result.
+// this (match_tick); everyone else hears the result.
 soldier_served_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
 	if !s.active do return

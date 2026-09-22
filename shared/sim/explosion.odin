@@ -57,7 +57,7 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 	// previous position pulled back, which Verlet turns into a kick away from the blast
 	for &t in w.things {
 		if t.style == .None do continue
-		if t.style != .Alpha_Flag && t.style != .Bravo_Flag && !w.round.kits_collide do continue
+		if t.style != .Alpha_Flag && t.style != .Bravo_Flag && !w.match.kits_collide do continue
 		for k in 0 ..< 4 {
 			a := b.pos - t.pos[k]
 			dist2 := vec2_dot(a, a)

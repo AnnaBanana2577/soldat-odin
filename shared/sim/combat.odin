@@ -331,7 +331,7 @@ calculate_bink :: proc(accumulated: u16, bink: int) -> u16 {
 // from a teammate without friendly fire.
 hit_spray :: proc(ctx: ^Context, w: ^World, victim, attacker: u8) {
 	v, a := &w.soldiers[victim], &w.soldiers[attacker]
-	if victim != attacker && !w.round.friendly_fire && v.team != .None && v.team == a.team do return
+	if victim != attacker && !w.match.friendly_fire && v.team != .None && v.team == a.team do return
 	bink := ctx.weapons[v.weapon.id].bink
 	if bink > 0 do v.hit_spray = calculate_bink(v.hit_spray, int(bink))
 }

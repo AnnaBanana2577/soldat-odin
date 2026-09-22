@@ -31,7 +31,7 @@ point_line_distance :: proc(p1, p2, p3: Vec2) -> f32 {
 	return vec2_length(closest - p3)
 }
 
-// Pascal's Round() uses banker's rounding; sector lookups depend on it.
+// Pascal's Match() uses banker's rounding; sector lookups depend on it.
 round_half_even :: proc(x: f32) -> int {
 	f := math.floor(x)
 	diff := x - f

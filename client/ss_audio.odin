@@ -92,7 +92,7 @@ audio_tick :: proc(a: ^Audio, ctx: ^sim.Context, w: ^sim.World, events: ^sim.Eve
 	a.camera = camera
 	a.listener = mine.active ? mine.pos : a.camera
 	if a.ringing > -1 do a.ringing -= 1
-	audio_clock(a, &w.round)
+	audio_clock(a, w.match)
 	for e in sim.events_slice(events) do audio_event(a, e, w, me)
 	for &s, i in w.soldiers do audio_soldier(a, ctx, u8(i), &s, w.tick)
 	audio_bullets(a, ctx, w, me)
@@ -355,7 +355,7 @@ audio_kill :: proc(a: ^Audio, e: sim.Kill, me: u8) {
 
 // The time-left beeps, closer together toward the end.
 @(private = "file")
-audio_clock :: proc(a: ^Audio, r: ^sim.Round) {
+audio_clock :: proc(a: ^Audio, r: ^sim.Match) {
 	if r.state != .Playing do return
 	t := r.time_left
 	beep := false

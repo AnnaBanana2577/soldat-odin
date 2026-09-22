@@ -45,7 +45,7 @@ scoreboard_draw :: proc(h: ^Hud, g: ^Game, sc: Screen) {
 	draw_panel(h, sc, x + 25, y + 5, SCORES_WIDTH, bottom)
 
 	text(h, sc, .Small, g.content.map_name, x + 30, y + 15, {233, 180, 12, 255})
-	seconds := max(w.round.time_left, 0) / sim.TICK_RATE
+	seconds := max(w.match.time_left, 0) / sim.TICK_RATE
 	text(h, sc, .Small, fmt.tprintf("Time %02d:%02d", seconds / 60, seconds % 60), x + 485, y + 15, {170, 160, 200, 230})
 	text(h, sc, .Small, "Players", x + 330, y + 15, {200, 190, 180, 240})
 	text(h, sc, .Small, fmt.tprint(on_team[.Alpha]), x + 440, y + 10, team_color(.Alpha))
@@ -85,8 +85,8 @@ scoreboard_draw :: proc(h: ^Hud, g: ^Game, sc: Screen) {
 	}
 
 	// the round is over: who won, and how long until the next
-	if w.round.state == .Ended {
-		r := &w.round
+	if w.match.state == .Ended {
+		r := w.match
 		alpha, bravo := r.scores[.Alpha], r.scores[.Bravo]
 		middle := x + 25 + SCORES_WIDTH / 2
 		under := y + 5 + bottom + 6

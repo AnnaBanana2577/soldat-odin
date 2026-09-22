@@ -30,7 +30,7 @@ bot_walk :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 		if u8(i) == slot || u8(i) == b.friend || !o.active || o.team == .Spectator do continue
 		if o.bonus == .Predator && !o.holding_flag do continue // unseen, unless it carries something
 		dead := o.dead
-		if dead && !(b.prof.shoot_dead && o.respawn_counter > w.round.respawn_time - DEAD_INTEREST) do continue
+		if dead && !(b.prof.shoot_dead && o.respawn_counter > w.match.respawn_time - DEAD_INTEREST) do continue
 		start := bot_head(ctx, w, u8(i))
 		if _, inside := collision_test(level, start); inside do start.y += 6 // a head in the ground
 		d, blocked := ray_cast(level, look, start, BOT_SIGHT)
@@ -50,9 +50,9 @@ bot_walk :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 	if b.pissed_off == slot do b.pissed_off = NOBODY
 	if b.pissed_off != NOBODY {
 		o := &w.soldiers[b.pissed_off]
-		if !o.active || (!w.round.friendly_fire && o.team == s.team) do b.pissed_off = NOBODY
+		if !o.active || (!w.match.friendly_fire && o.team == s.team) do b.pissed_off = NOBODY
 	}
-	if b.target != NOBODY && w.round.friendly_fire && w.soldiers[b.target].team != s.team {
+	if b.target != NOBODY && w.match.friendly_fire && w.soldiers[b.target].team != s.team {
 		b.pissed_off = NOBODY
 	}
 	if b.pissed_off != NOBODY {
@@ -230,7 +230,7 @@ bot_seek_thing :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8, held: ^Thing
 			wanted = true
 		case .Cluster_Kit:  wanted = s.grenades == 0
 		case .Medical_Kit:  wanted = s.health < DEFAULT_HEALTH
-		case .Grenade_Kit:  wanted = s.grenades < w.round.max_grenades
+		case .Grenade_Kit:  wanted = s.grenades < w.match.max_grenades
 		case .Weapon:       wanted = t.weapon == .Knife // a thrown knife to take up again
 		}
 		if !wanted do continue

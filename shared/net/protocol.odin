@@ -36,7 +36,7 @@ package net
 
 import "../sim"
 
-VERSION      :: 12
+VERSION      :: 13 // the Map carries the match rules
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
@@ -80,6 +80,13 @@ Map :: struct {
 	name:      string,
 	flag_home: [2]sim.Vec2,
 	tick:      u32, // the server tick the round starts at
+	// the rules of the match played on it, so that a client simulates by the same ones
+	// as the server rather than by whatever match_init leaves behind
+	respawn_time:  i32,
+	max_grenades:  i32,
+	score_limit:   i32,
+	friendly_fire: bool,
+	kits_collide:  bool,
 }
 
 Denied :: struct {
@@ -231,7 +238,7 @@ Update :: struct {
 	tick:        u32,
 	ack:         u32,
 	depth:       u8,
-	round:       sim.Round, // state, time left, the two scores
+	match:       sim.Match, // state, time left, the two scores
 	active:      u32,
 	lags:        [sim.MAX_PLAYERS]u8,
 	entries:     [sim.MAX_PLAYERS]Entry,
@@ -492,6 +499,11 @@ ser_map :: proc(s: ^Stream, m: ^Map) {
 	ser_vec2(s, &m.flag_home[0])
 	ser_vec2(s, &m.flag_home[1])
 	ser_u32(s, &m.tick)
+	ser_as(s, &m.respawn_time, i16)
+	ser_as(s, &m.max_grenades, u8)
+	ser_as(s, &m.score_limit, u16)
+	ser_bool(s, &m.friendly_fire)
+	ser_bool(s, &m.kits_collide)
 }
 
 ser_denied :: proc(s: ^Stream, m: ^Denied) {
@@ -573,11 +585,11 @@ ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_u32(s, &m.tick)
 	ser_u32(s, &m.ack)
 	ser_u8(s, &m.depth)
-	ser_enum(s, &m.round.state)
-	ser_as(s, &m.round.time_left, i32)
-	ser_as(s, &m.round.counter, i16)
-	ser_as(s, &m.round.scores[.Alpha], u16)
-	ser_as(s, &m.round.scores[.Bravo], u16)
+	ser_enum(s, &m.match.state)
+	ser_as(s, &m.match.time_left, i32)
+	ser_as(s, &m.match.counter, i16)
+	ser_as(s, &m.match.scores[.Alpha], u16)
+	ser_as(s, &m.match.scores[.Bravo], u16)
 	ser_u32(s, &m.active)
 	for i in 0 ..< sim.MAX_PLAYERS do if m.active & (1 << u32(i)) != 0 do ser_u8(s, &m.lags[i])
 	ser_count(s, &m.entry_count, sim.MAX_PLAYERS)

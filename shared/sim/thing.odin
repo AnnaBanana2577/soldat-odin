@@ -172,7 +172,7 @@ things_spawn :: proc(ctx: ^Context, w: ^World) {
 		thing_create(ctx, w, .Bravo_Flag, pos)
 	}
 	for _ in 0 ..< ctx.level.medikits do kit_spawn(ctx, w, .Medical_Kit)
-	if w.round.max_grenades > 0 do for _ in 0 ..< ctx.level.grenade_packs do kit_spawn(ctx, w, .Grenade_Kit)
+	if w.match.max_grenades > 0 do for _ in 0 ..< ctx.level.grenade_packs do kit_spawn(ctx, w, .Grenade_Kit)
 	for s in ctx.level.spawnpoints {
 		if s.active && s.team == SPAWN_STAT_GUN {
 			if i, ok := thing_create(ctx, w, .Stat_Gun, s.pos); ok do w.things[i].timeout = 60

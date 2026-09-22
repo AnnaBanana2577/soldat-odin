@@ -29,6 +29,7 @@ Game :: struct {
 	content:   sim.Content,   // the map, the animations, the skeletons, the weapons
 	missing:   string, // a map the server named and that is not here
 	world:     sim.World,
+	match:     sim.Match,    // the world borrows it
 	me:        u8,
 	view:      View,       // the others
 	names:     [sim.MAX_PLAYERS]net.Name, // who plays in which slot, from the server's roster
@@ -76,8 +77,9 @@ game_init :: proc(g: ^Game, base: string, me: u8, interp_least: int, clock_targe
 	g.me = me
 	g.primary, g.secondary = .AK74, .Colt // what the server arms a newcomer with
 	sim.world_init(&g.world, 0)
+	g.world.match = &g.match
 	g.time_scale = 1
-	sim.round_init(&g.world.round)
+	sim.match_init(g.world.match)
 	view_init(&g.view, interp_least)
 	g.clock_target = f64(clock_target)
 	g.incoming = new(net.Message)
@@ -147,7 +149,14 @@ receive_map :: proc(g: ^Game, m: ^net.Map) {
 	w := &g.world
 	w.things, w.bullets, w.ragdolls = {}, {}, {}
 	w.flag_home = m.flag_home
-	sim.round_init(&w.round)
+	sim.match_init(w.match)
+	// the server's rules over match_init's defaults, so that what this client predicts
+	// of a kit, a respawn or a blast is what the server will rule
+	w.match.respawn_time = m.respawn_time
+	w.match.max_grenades = m.max_grenades
+	w.match.score_limit = m.score_limit
+	w.match.friendly_fire = m.friendly_fire
+	w.match.kits_collide = m.kits_collide
 	if m.tick > 0 do g.newest = max(g.newest, m.tick - 1)
 }
 
@@ -159,10 +168,10 @@ receive_update :: proc(g: ^Game, m: ^net.Update) {
 	g.lags = m.lags
 	g.my_lag = int(m.lags[g.me])
 	g.server_depth = m.depth
-	g.world.round.state = m.round.state
-	g.world.round.time_left = m.round.time_left
-	g.world.round.counter = m.round.counter
-	g.world.round.scores = m.round.scores
+	g.match.state = m.match.state
+	g.match.time_left = m.match.time_left
+	g.match.counter = m.match.counter
+	g.match.scores = m.match.scores
 	view_heard(&g.view, m.tick)
 	for &s, i in g.world.soldiers {
 		if m.active & (1 << u32(i)) == 0 do s = {}
@@ -334,7 +343,7 @@ step_world :: proc(g: ^Game) {
 @(private)
 wounds :: proc(g: ^Game, shooter, target: u8) -> bool {
 	a, b := &g.world.soldiers[shooter], &g.world.soldiers[target]
-	return g.world.round.friendly_fire || a.team == .None || a.team != b.team
+	return g.match.friendly_fire || a.team == .None || a.team != b.team
 }
 
 // ---- sending ----

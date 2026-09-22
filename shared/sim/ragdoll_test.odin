@@ -18,6 +18,7 @@ Fixture :: struct {
 	events: Events,
 	seen:   Events, // every event of the run, since a tick clears its own
 	cmds:   [MAX_PLAYERS]Command,
+	match:  Match,  // the world borrows it, as a game would
 }
 
 // A soldier of each team, landed and out of its spawn protection, on `map_name`.
@@ -31,6 +32,8 @@ fixture :: proc(map_name: string) -> (f: ^Fixture, ok: bool) {
 	weapons_default(&f.ctx.weapons)
 	f.world = new(World)
 	world_init(f.world, 4213)
+	f.world.match = &f.match
+	match_init(f.world.match)
 	f.world.authority = true
 	teams := []Team{.Alpha, .Bravo}
 	for team, i in teams {

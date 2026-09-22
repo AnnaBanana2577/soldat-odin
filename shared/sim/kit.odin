@@ -67,7 +67,7 @@ bonus_spawn :: proc(ctx: ^Context, w: ^World, style: Thing_Style) {
 kit_eligible :: proc(w: ^World, style: Thing_Style, s: ^Soldier) -> bool {
 	#partial switch style {
 	case .Medical_Kit:  return s.health < DEFAULT_HEALTH
-	case .Grenade_Kit:  return s.grenades < w.round.max_grenades
+	case .Grenade_Kit:  return s.grenades < w.match.max_grenades
 	case .Flamer_Kit:   return s.bonus == .None && s.cease_fire_counter < 1 && s.weapon.id != .Bow && s.weapon.id != .Bow2
 	case .Predator_Kit, .Berserk_Kit: return s.bonus == .None && s.cease_fire_counter < 1
 	case .Vest_Kit:     return s.vest < DEFAULT_VEST
@@ -88,7 +88,7 @@ kit_pickup :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, soldier: u8, 
 	emit(events, Kit_Pickup{player = soldier, thing = index, kit = style, pos = t.pos[0]})
 	thing_clear(t)
 	if !is_bonus_kit(style) {
-		t.respawn_wait = w.round.respawn_time
+		t.respawn_wait = w.match.respawn_time
 		t.respawn_style = style
 	}
 }
@@ -100,7 +100,7 @@ kit_give :: proc(ctx: ^Context, w: ^World, s: ^Soldier, style: Thing_Style) {
 	case .Medical_Kit:
 		s.health = DEFAULT_HEALTH
 	case .Grenade_Kit:
-		s.grenades = w.round.max_grenades
+		s.grenades = w.match.max_grenades
 	case .Flamer_Kit:
 		s.secondary = s.weapon
 		s.weapon = weapon_state(ctx, .Flamer)

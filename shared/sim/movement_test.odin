@@ -15,6 +15,7 @@ Fixture :: struct {
 	skels:  ^Skeletons,
 	ctx:    Context,
 	world:  ^World,
+	match:  Match,  // the world borrows it, as a game would
 	events: Events,
 	cmds:   [MAX_PLAYERS]Command,
 	aim:    Vec2, // where the cursor is held, which is what `direction` follows
@@ -32,7 +33,8 @@ fixture :: proc(aim_x: f32) -> (f: ^Fixture, ok: bool) {
 	f.world = new(World)
 	world_init(f.world, 99)
 	f.world.authority = true
-	round_init(&f.world.round)
+	f.world.match = &f.match
+	match_init(f.world.match)
 	s := &f.world.soldiers[0]
 	soldier_spawn(&f.ctx, s, level_spawn_point(&f.level, .Alpha, &f.world.rng), .Alpha, .AK74, .Colt)
 	s.cease_fire_counter = -1

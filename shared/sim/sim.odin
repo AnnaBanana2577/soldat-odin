@@ -21,7 +21,7 @@
 //     and the sounds are local everywhere.
 //   - Only with authority do hits become wounds (damage_apply), are things made, taken,
 //     returned and scored, do the dead respawn, and does the map's own harm count
-//     (soldier_served_tick, round_tick). A bullet there meets the soldiers as its
+//     (soldier_served_tick, match_tick). A bullet there meets the soldiers as its
 //     shooter saw them (history).
 //   - Tools and tests run step() on a whole world with authority, which does all of it
 //     at once.
@@ -78,7 +78,7 @@ World :: struct {
 	soldiers: [MAX_PLAYERS]Soldier,
 	bullets:  [MAX_BULLETS]Bullet,
 	things:   [MAX_THINGS]Thing,
-	round:    Round,
+	match:    ^Match,  // borrowed: the game owns the match, as it owns the world
 	flag_home: [2]Vec2, // where the alpha and bravo flags spawn and return to
 
 	ragdolls: [MAX_PLAYERS]Ragdoll, // the corpses, one per dead soldier
@@ -109,6 +109,6 @@ step :: proc(ctx: ^Context, w: ^World, cmds: []Command, events: ^Events) {
 	ragdolls_update(ctx, w, events)
 	things_update(ctx, w, events)
 	bullets_update(ctx, w, events)
-	round_tick(ctx, w, events)
+	match_tick(ctx, w, events)
 	w.tick += 1
 }

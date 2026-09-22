@@ -14,8 +14,8 @@ update_round_trip :: proc(t: ^testing.T) {
 
 	u := Update{tick = 1234, ack = 99, depth = 3, active = 0b101}
 	u.lags[0], u.lags[2] = 7, 9
-	u.round.time_left = 99
-	u.round.scores[.Bravo] = 3
+	u.match.time_left = 99
+	u.match.scores[.Bravo] = 3
 	e := &u.entries[0]
 	e^ = {slot = 2, has_owned = true}
 	e.soldier.active = true

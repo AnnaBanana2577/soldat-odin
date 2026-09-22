@@ -31,6 +31,7 @@ import "../shared/sim"
 Game :: struct {
 	content:    sim.Content, // the map, the animations, the skeletons, the weapons
 	world:      sim.World,
+	match:      sim.Match,   // the world borrows it
 	history:    sim.History, // the last second of soldiers, for judging shots as their shooters saw
 	max_rewind: u32,         // ticks: how far back a shot is judged at most; a slower shooter leads
 	rules:      Rules,
@@ -107,6 +108,7 @@ game_init :: proc(g: ^Game, base: string, rules: Rules) -> bool {
 	if !sim.content_load(&g.content, base) do return false
 	g.profiles = sim.bot_profiles_load(base)
 	sim.world_init(&g.world, 1)
+	g.world.match = &g.match
 	g.world.authority = true
 	g.world.history = &g.history
 	if !map_load(g, rules.maps[0]) do return false
@@ -144,24 +146,33 @@ round_start :: proc(g: ^Game) {
 	w := &g.world
 	w.bullets, w.ragdolls = {}, {}
 	g.history.count = 0 // what the soldiers did on the last map is no target
-	sim.round_init(&w.round)
-	if g.rules.time_limit > 0 do w.round.time_left = g.rules.time_limit
-	if g.rules.score_limit > 0 do w.round.score_limit = g.rules.score_limit
-	if g.rules.respawn_time > 0 do w.round.respawn_time = g.rules.respawn_time
-	w.round.max_grenades = g.rules.max_grenades
-	w.round.friendly_fire = g.rules.friendly_fire
-	w.round.kits_collide = g.rules.kits_collide
+	sim.match_init(w.match)
+	if g.rules.time_limit > 0 do w.match.time_left = g.rules.time_limit
+	if g.rules.score_limit > 0 do w.match.score_limit = g.rules.score_limit
+	if g.rules.respawn_time > 0 do w.match.respawn_time = g.rules.respawn_time
+	w.match.max_grenades = g.rules.max_grenades
+	w.match.friendly_fire = g.rules.friendly_fire
+	w.match.kits_collide = g.rules.kits_collide
 	sim.things_spawn(&g.content.ctx, w)
 	g.things_sent = {} // the clients drop theirs on hearing of the map: every thing goes again
 	clear(&g.born)
 }
 
+// The map and the rules of the match on it. The rules go with it because a client
+// simulates by them too: what a kit gives, when a soldier comes back, whether a blast
+// moves a kit, whether a team mate can be wounded.
 map_message :: proc(g: ^Game) -> net.Message {
-	return net.Map{name = g.content.map_name, flag_home = g.world.flag_home, tick = g.world.tick}
+	m := g.world.match
+	return net.Map{
+		name = g.content.map_name, flag_home = g.world.flag_home, tick = g.world.tick,
+		respawn_time = m.respawn_time, max_grenades = m.max_grenades,
+		score_limit = m.score_limit, friendly_fire = m.friendly_fire,
+		kits_collide = m.kits_collide,
+	}
 }
 
 tick :: proc(g: ^Game, host: ^Host) {
-	if sim.round_over(&g.world.round) do next_round(g, host)
+	if sim.match_over(g.world.match) do next_round(g, host)
 	step_soldiers(g)
 	receive(g, host)
 	step_world(g)
@@ -460,7 +471,7 @@ step_world :: proc(g: ^Game) {
 	sim.ragdolls_update(&g.content.ctx, w, &g.events)
 	sim.things_update(&g.content.ctx, w, &g.events)
 	sim.bullets_update(&g.content.ctx, w, &g.events)
-	sim.round_tick(&g.content.ctx, w, &g.events)
+	sim.match_tick(&g.content.ctx, w, &g.events)
 	reported := g.events.count
 	for i in 0 ..< reported {
 		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.content.ctx, w, hit, &g.events)
@@ -555,7 +566,7 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 		if !c.connected || c.bot do continue
 		me := &w.soldiers[ri]
 		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
-		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, round = w.round, active = active, lags = lags}
+		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, match = w.match^, active = active, lags = lags}
 		m := &g.outgoing.(net.Update)
 		for &s, i in w.soldiers {
 			if !s.active do continue
