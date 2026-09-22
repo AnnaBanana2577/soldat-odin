@@ -291,3 +291,39 @@ HUD's: it empties `Game` of the outbox so `Server_Game` is `{ world, match }`. W
 does not do is make the HUD isolable, which is what an earlier draft of this plan
 claimed. The eight action procedures move to the outbox because that is where they
 belong, not because the HUD needs them moved to escape.
+
+## What belongs in subsystems, and what does not
+
+`subsystems/` is for what is generic: what depends only on `shared/` and knows nothing
+of a running client. Isolable and generic are not the same test, and the first one alone
+would put the whole of `client/render` there, which would be wrong: it draws soldiers.
+
+The editor settles where the line falls, because it renders maps without a game and so
+uses exactly the generic half. It names `Map_View`, `Map_Parts`, `map_view_load`,
+`map_view_draw`, `map_view_bounds`, `map_view_unload`, `Camera`, `camera_fit`,
+`camera_pan`, `camera_zoom_at`, `rl_camera`, `pixels_per_unit` and `color_of`. It names
+nothing from `gostek`, `bullet_art`, `things_art` or `sparks`.
+
+So:
+
+	subsystems/gfx/     textures, sprite, camera, map_view, minimap, color_of
+	subsystems/sound/   loading, playing, the listener, volume
+	subsystems/input/   keys and mouse
+	subsystems/net/     the link, the outbox, the simulated line
+
+	game/render/        gostek, bullet_art, things_art, sparks, the Scene
+	game/audio/         which sound belongs to which event
+	game/               world, match, predict, view, hud
+
+`gfx` draws a map, a sprite, a camera: anything with a level can use it, and the editor
+does. `game/render` draws *this game*: the gostek from a pose, the bullet art by style,
+the sparks from the events. It is isolable, taking the state it draws as arguments, but
+it is not generic and has no business under `subsystems/`.
+
+The same split runs through the sound. Loading a wav, placing it by distance and holding
+a listener is generic; knowing that a Fire event of a Flamer plays flamer.wav is the
+game's.
+
+Stage 6 stands either way. Cutting `render` and `audio` free of `game` is what makes
+both halves placeable at all, and it is done. Where the halves go is a folder move, and
+the folders move last.
