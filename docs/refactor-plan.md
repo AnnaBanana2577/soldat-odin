@@ -63,14 +63,49 @@ No wire change, no behaviour change. The largest clarity win for the least risk.
 
 ## Stage 3: the networking out of the game
 
-- Client: `pending`, `seq`, `acts`, `called`, `asked`, `said`, `seen_shot` and `newest`
-  are an outbox and an inbox, not game state. They move to the connection layer.
-- Server: `clients`, `born`, `ends`, `shot_seq` and `things_sent` move the same way.
-- What is left on either `Game` is the world, the match, and the prediction the client
-  needs (`view`, `error`, the clock).
+The stage the rest depends on. It is what frees the HUD, so it comes early.
 
-After this a `Server_Game` really is `{ world, match }`, which is what the conversation
-is after.
+**What moves.** On the client, `pending`, `seq`, `acts`, `called`, `asked`, `said`,
+`seen_shot` and `newest` are an outbox and an inbox, not game state. On the server,
+`clients`, `born`, `ends`, `shot_seq` and `things_sent` are the same. What is left on
+either `Game` is the world, the match, and the prediction the client needs (`view`,
+`error`, the clock). A `Server_Game` then really is `{ world, match }`.
+
+**The shape the outbox lands in.** It becomes a struct in `subsystems/net`, below both
+the game and the HUD, with procedures named for it:
+
+	Outbox :: struct {
+	    acts:   [dynamic]net.Act,
+	    said:   [dynamic]net.Chat,
+	    called: [dynamic]net.Vote,
+	    asked:  [dynamic]net.Map_Query,
+	}
+
+	outbox_join_team :: proc(o: ^Outbox, team: sim.Team)
+	outbox_say       :: proc(o: ^Outbox, line: string, team: bool)
+	outbox_vote      :: proc(o: ^Outbox, v: net.Vote)
+	outbox_ask_map   :: proc(o: ^Outbox, index: int)
+	outbox_loadout   :: proc(o: ^Outbox, primary, secondary: sim.Weapon_Id)
+
+The eight procedures the HUD calls on `Game` today move here, and the HUD takes an
+`^Outbox` where it takes a `^game.Game` now. The call count does not change and neither
+does the directness; what changes is that the arrow points down.
+
+The rule this follows, worth stating once: **a module the HUD calls is fine, as long as
+it sits below the HUD.** The trouble was never that the HUD mutates something. It was
+that it reached up into the thing that owns it.
+
+**Two that are not plain appends.** `vote_yes` also clears `vote.active`, which is local
+interface state and stays with the HUD. `choose_weapons` also arms the soldier when it
+has not moved since spawning, so the HUD calls `outbox_loadout` and `sim.soldier_arm`,
+both of which are below it.
+
+**Intents, deferred.** The HUD could instead return a `Hud_Intent` union for the client
+to drain, which would make it a pure function of state in to picture and intents out,
+and testable with no network and no game. Not now: fourteen call sites do not pay for a
+drain loop, and the ordering it usually buys is already there, since `hud.input` runs
+before the game tick and says what it took. Worth revisiting the day the HUD wants
+tests, and the conversion is mechanical once the calls go to one module.
 
 ## Stage 4: Client_Game, and App becomes Client
 
