@@ -7,8 +7,12 @@ x Bots bullets are invisible
 x Death ragdolls have weird physics currently
 x Weps menu after spawn not working
 x Spawn timer remove
+x Roll/flip parity with opensoldat — read against Control.pas line for line and traced
+  tick for tick against ../soldat-love, which agrees: entry, direction, forces, the two
+  machines in lockstep, the graceful end, the free flip, the animation files and their
+  speeds, the stance, and the roll's sound and the reload it silences all match. Nothing
+  found to fix; shared/sim/movement_test.odin now holds it there.
 - Flag throws
-- Roll/flip parity with opensoldat
 - HUD parity
   - Big Messages for everything
   - Parity gaps in things that exist:
@@ -166,6 +170,12 @@ what is in; this is the rest of it.
 - A thrown gun appears a round trip after the throw, for the same reason.
 - A gun dropped at death does not carry the body's velocity, where Soldat's does.
   Deliberate: with it the gun flew off whenever a soldier died moving.
+- Holding left and right together is remembered for the tick it happened on, and the
+  jet flip reads it there. The original keeps it in a global it never clears
+  (PlayerPressedLeftRight, set in the client's own input and read in the flip's
+  condition), so once a player has pressed the two together, every later side jump
+  flips on the jet whichever way it is going, and only on that player's own screen.
+  Deliberate: the flip would be predicted and never ruled.
 - A client goes on playing for half a round trip after the server has killed it: it
   keeps firing on its own screen, and counts hits on itself that the server never rules.
   The server runs none of those commands, so nothing of it reaches anyone else.
