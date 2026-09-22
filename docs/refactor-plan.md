@@ -117,6 +117,7 @@ Stage 6 first, though it is numbered last: it is self-contained, changes no prot
 and every folder move afterwards assumes it. Then 1, 2 and 3, the shared core, each one
 making the next smaller. Then 4 and 5, the client's shape, which need 3 to have emptied
 the `Game` structs first. The folders move last, when the imports already obey them.
+
 ## The gate on every stage
 
 	odin run build.odin -file -- check
