@@ -30,6 +30,8 @@ Game :: struct {
 	missing:   string, // a map the server named and that is not here
 	world:     sim.World,
 	match:     sim.Match,    // the world borrows it
+	camera:    Camera,      // where this client is looking
+	hud:       Hud,         // what it draws over the game (hud.odin)
 	me:        u8,
 	view:      View,       // the others
 	names:     [sim.MAX_PLAYERS]net.Name, // who plays in which slot, from the server's roster
