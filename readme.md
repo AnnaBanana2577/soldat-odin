@@ -164,9 +164,15 @@ what you see while making a thing is what the game will show.
 - Corpses: a dead soldier's skeleton runs on as a ragdoll from its pose at the moment
   of death, falls with the original's damping and gravity, collides with the map and
   comes to rest; a death far below zero health tears the body apart, a head or leg
-  shot past the chop threshold takes that part off; blasts shove corpses. Corpses
-  touch nothing but the map, so every client runs its own from the kill and nothing
-  about them crosses the wire. A suicide (K) shows one.
+  shot past the chop threshold takes that part off; blasts shove corpses, and a corpse
+  shot enough comes further apart. Nothing about a corpse crosses the wire: it is
+  derived from the soldier's state (where it died, how fast, how far below zero its
+  health went and where it was last hit), so the server and every client run the same
+  one from the same word, and a bullet meets a body on the server as it does on the
+  screen that fired it — where the body lies this tick, since no history is kept of it.
+  A body landing thuds, and cracks its bones on a hard landing, both quieting as it
+  settles; where it was cut it bleeds, thinning after two seconds and stopping after
+  five. A suicide (K) shows one.
 - Sounds: Sound.pas on raylib's audio. Every play is placed by distance and direction
   from our soldier; gunfire and blasts past half the range play their distant
   samples; a blast beside us rings the ears. Shots, hits, ricochets, blasts, deaths

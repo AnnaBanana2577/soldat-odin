@@ -26,6 +26,12 @@ Spark_Style :: enum u8 {
 SPARK_MOVES    :: bit_set[Spark_Style]{.Smoke, .Chip, .Lil_Blood, .Blood, .Chip_Fire, .Mini_Smoke}
 SPARK_COLLIDES :: bit_set[Spark_Style]{.Lil_Blood, .Blood}
 
+// One in this many ticks a cut joint drips, by how busy the screen already is
+// (BLOOD_RANDOM_LOW, _NORMAL, _HIGH in the original's constants).
+BLOOD_RANDOM_LOW    :: 22
+BLOOD_RANDOM_NORMAL :: 10
+BLOOD_RANDOM_HIGH   :: 6
+
 Spark :: struct {
 	style:    Spark_Style, // None is a free slot
 	life:     f32,
@@ -136,6 +142,36 @@ sparks_event :: proc(s: ^Sparks, e: sim.Event, soldiers: ^[sim.MAX_PLAYERS]sim.S
 			spark_add(s, v.pos, {0, -0.4}, .Smoke, 50)
 		case:
 			spark_add(s, v.pos, {0, -0.2}, .Lil_Blood, 45)
+		}
+	}
+}
+
+// The corpses bleed from where they were cut (TSprite.Update's dead branch): every body
+// point an end of a torn constraint hangs off drips, thrown along the way that point is
+// moving. It thins after two seconds and stops after five, and thins again while the
+// screen is already full of sparks, so a pile of bodies does not drown everything else.
+// Nothing here is the sim's: the corpse and its cuts are, and this reads them.
+sparks_corpses :: proc(s: ^Sparks, w: ^sim.World, skeleton: ^sim.Particle_Object) {
+	if !s.loaded do return
+	live := 0
+	for &spark in s.pool do if spark.style != .None do live += 1
+	base := live > 300 ? BLOOD_RANDOM_LOW : live > 50 ? BLOOD_RANDOM_NORMAL : BLOOD_RANDOM_HIGH
+
+	for &soldier, i in w.soldiers {
+		r := &w.ragdolls[i]
+		if !soldier.active || !soldier.dead || !r.active || r.torn == {} do continue
+		odds := base
+		if r.dead_time > sim.LESSBLEED_TIME do odds *= 2
+		if r.dead_time > sim.NOBLEED_TIME do odds *= 100
+		for point in 0 ..< sim.POSE_POINTS {
+			for c, ci in skeleton.constraints {
+				if ci not_in r.torn || (c[0] != point && c[1] != point) do continue
+				if ci == 9 || ci == 10 do continue // the two the original leaves dry
+				at := r.pos[point] + {0, 2}
+				vel := (r.pos[point] - r.old_pos[point]) * 0.35
+				if rand_int(s, odds) == 0 do spark_add(s, at, vel, .Blood, 85 - f32(rand_int(s, 25)))
+				else if rand_int(s, max(odds / 3, 1)) == 0 do spark_add(s, at, vel, .Lil_Blood, 85 - f32(rand_int(s, 25)))
+			}
 		}
 	}
 }

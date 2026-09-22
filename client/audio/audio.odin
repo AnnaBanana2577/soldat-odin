@@ -294,6 +294,12 @@ audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
 		if target.dead do sound_play(a, "dead-hit.wav", v.pos)
 		else if target.vest > 0 do sound_play(a, "vesthit.wav", v.pos)
 		else do sound_play(a, pick(a, HIT_ARG), v.pos)
+	case sim.Corpse_Hit:
+		// CheckSkeletonMapCollision: the thud of a body landing, and the crack of bones
+		// on a hard one. Both quieten as the body settles, so a corpse rolling to a stop
+		// does not rattle on.
+		sound_play(a, "bodyfall.wav", v.pos)
+		if v.fall > sim.CORPSE_CRACK_FALL && v.count < sim.CORPSE_CRACK_HITS do sound_play(a, "bonecrack.wav", v.pos)
 	case sim.Kill:
 		audio_kill(a, v, g.me)
 		if w.soldiers[v.killer].bonus == .Berserker && v.killer != v.target do sound_play(a, "killberserk.wav", v.pos - {0, 12})

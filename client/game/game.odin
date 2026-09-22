@@ -344,7 +344,7 @@ step_mine :: proc(g: ^Game, in_: ^input.Input) {
 // wound is the server's to give, but the shove of one on me is felt here, where I am
 // stepped. That goes for a bullet that reached me while it was flown on, too.
 step_world :: proc(g: ^Game) {
-	sim.ragdolls_update(&g.ctx, &g.world)
+	sim.ragdolls_update(&g.ctx, &g.world, &g.events)
 	sim.things_update(&g.ctx, &g.world, &g.events)
 	sim.bullets_update(&g.ctx, &g.world, &g.events)
 	g.world.tick += 1
@@ -355,6 +355,7 @@ step_world :: proc(g: ^Game) {
 	for e in sim.events_slice(&g.events) {
 		hit, is_hit := e.(sim.Hit)
 		if !is_hit do continue
+		if g.world.soldiers[hit.target].dead do continue // a body is no hit, as the original's statistics have it
 		if hit.target == g.me && hit.shooter != g.me && wounds(g, hit.shooter, g.me) do g.hits_taken += 1
 		else if hit.shooter == g.me && hit.target != g.me && wounds(g, g.me, hit.target) do g.hits_given += 1
 	}

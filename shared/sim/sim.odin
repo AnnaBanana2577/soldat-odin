@@ -98,13 +98,15 @@ world_init :: proc(w: ^World, seed: u64) {
 
 DEFAULT_GRAVITY :: 0.06
 
-// Everything at once: the tools' and tests' whole-world tick.
+// Everything at once, in the order the server and the clients run it: the tools' and
+// tests' whole-world tick.
 step :: proc(ctx: ^Context, w: ^World, cmds: []Command, events: ^Events) {
 	events_clear(events)
 	for &s, i in w.soldiers {
 		if !s.active do continue
 		soldier_step(ctx, w, u8(i), cmds[i], events)
 	}
+	ragdolls_update(ctx, w, events)
 	things_update(ctx, w, events)
 	bullets_update(ctx, w, events)
 	round_tick(ctx, w, events)

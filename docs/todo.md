@@ -3,12 +3,12 @@
 What is left. The readme says how the netcode works (the model, at the top) and what it
 measured; this says what it does not do yet. Checked against the code on 2026-09-21.
 
-- Bots bullets are invisible
-- Roll/flip parity with opensoldat
-- Death ragdolls have weird physics currently
+x Bots bullets are invisible
+x Death ragdolls have weird physics currently
 - Weps menu after spawn not working
 - Spawn timer remove
 - Flag throws
+- Roll/flip parity with opensoldat
 - HUD parity
   - Big Messages for everything
   - Parity gaps in things that exist:
@@ -34,6 +34,9 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
 - Demos
 - Map editor
 - Editor for po and poa
+- -----
+- Code refactor
+- GitHub workflows for packaging
 
 ## Netcode
 
@@ -85,14 +88,12 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
   A setting can only be given at startup (config.cfg or the command line), not changed
   while playing.
 - The weapons menu offers every weapon; a server's list of allowed ones is not in.
-- Sounds missing: the corpse's thud, shell casings, the antics. Shell casings are not
-  drawn either.
+- Sounds missing: shell casings, the antics. Shell casings are not drawn either.
 - The sim's own gaps, each marked TODO where it belongs: the stationary gun's burst,
   heat and overheat (stat_gun.odin); the antics on the body animation (antics.odin); the
   parachute hung from the head of the pose (parachute.odin); a thrown knife that lands
-  becoming a knife to pick up (dropped_gun.odin); corpses as targets for bullets
-  (bullet_collision.odin); the flag carrier check on hurting polygons
-  (soldier_collision.odin).
+  becoming a knife to pick up (dropped_gun.odin); the flag carrier check on hurting
+  polygons (soldier_collision.odin).
 
 ## HUD
 
@@ -161,6 +162,12 @@ what is in; this is the rest of it.
   keeps firing on its own screen, and counts hits on itself that the server never rules.
   The server runs none of those commands, so nothing of it reaches anyone else.
 - A corpse was twice seen hanging under a ceiling on ctf_Ash. Not reproduced.
+- A shot at a corpse is judged against the body where the server has it, not where its
+  shooter saw it: no history is kept of the corpses, and a client starts its own a few
+  ticks after the server does, so the two bodies are the same motion a moment apart.
+  It shows for the second or so a body is still moving; once it has settled they agree.
+  Both earlier ports make the same approximation. Rewinding a corpse would mean keeping
+  24 points a tick for a second, for a target that barely moves.
 - A test window takes the keyboard's focus when it opens, so keys typed elsewhere while
   it runs reach the game (a scripted run once picked a weapon from the menu this way).
 
@@ -175,3 +182,10 @@ knows it has been thought of.
 - OpenSoldat's netcode copied message for message.
 - Soldat's own model: a client owning its own movement and the server refereeing. It
   was carried far enough to feel both on one line, and then dropped.
+- Corpses on the clients alone, as decoration. Most of a corpse is decoration, but two
+  things are not: a bullet through a body loses a tenth of its speed, and speed is the
+  damage it does, so a body between two players is worth a tenth of a shot; and a body
+  comes apart by its health, which only the server may lower. Either the server runs
+  the corpses or neither of those can happen, and a full server of 32 of them costs
+  35 us of a tick's 16666. Nothing about them crosses the wire either way: every
+  machine derives the same body from the state a dead soldier's word already carries.

@@ -62,6 +62,7 @@ tick :: proc(r: ^Render, g: ^game.Game) {
 	map_sync(r, g)
 	if r.map_view.level == nil do return
 	for e in sim.events_slice(&g.events) do sparks_event(&r.sparks, e, &g.world.soldiers)
+	sparks_corpses(&r.sparks, &g.world, &g.ctx.skeletons.gostek)
 	sparks_update(&r.sparks, r.map_view.level)
 }
 // The world's part of the frame, in the original's layer order: the sky, the background

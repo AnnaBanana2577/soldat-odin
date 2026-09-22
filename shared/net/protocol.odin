@@ -332,6 +332,7 @@ ser_served :: proc(s: ^Stream, v: ^sim.Soldier) {
 	ser_as(s, &v.kills, u16)
 	ser_as(s, &v.deaths, u16)
 	ser_as(s, &v.flags, u16)
+	ser_vec2(s, &v.death_pos)
 	ser_vec2(s, &v.death_vel)
 	ser_u8(s, &v.death_part)
 	ser_u64(s, &v.rng)

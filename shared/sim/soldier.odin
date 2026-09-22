@@ -28,7 +28,12 @@ Soldier :: struct {
 	// means, so word from before a placing is never taken for word from after it.
 	life:     u8,
 	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
-	death_vel:  Vec2, // how it died, for the corpse any client starts from this state
+	// How it died, so that any client can start the corpse from this state alone. The
+	// position is here and not taken from `pos` because an update carries a dead
+	// soldier's server half only: its player's half, `pos` among it, stops at the
+	// death and would arrive as nothing.
+	death_pos:  Vec2,
+	death_vel:  Vec2,
 	death_part: u8,
 	rng:      u64, // its own randomness (the spread of its shots), rolled where it is played
 	cmd_seq:  u32, // the command it last ran: what its bullets are stamped with
@@ -197,7 +202,10 @@ soldier_served_tick :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events
 	if !s.active do return
 	if s.dead {
 		s.respawn_counter -= 1
-		if s.respawn_counter < 1 do soldier_respawn(ctx, w, index, events)
+		// CheckSkeletonOutOfBounds: a corpse that slid off the map is placed again at once
+		if s.respawn_counter < 1 || soldier_out_of_bounds(ctx, s.pos) {
+			soldier_respawn(ctx, w, index, events)
+		}
 		return
 	}
 	if soldier_out_of_bounds(ctx, s.pos) {
@@ -234,7 +242,7 @@ soldier_copy_served :: proc(dst, src: ^Soldier) {
 	dst.bonus, dst.bonus_time = src.bonus, src.bonus_time
 	dst.holding_flag = src.holding_flag
 	dst.kills, dst.deaths, dst.flags = src.kills, src.deaths, src.flags
-	dst.death_vel, dst.death_part = src.death_vel, src.death_part
+	dst.death_pos, dst.death_vel, dst.death_part = src.death_pos, src.death_vel, src.death_part
 	dst.rng, dst.cmd_seq, dst.view_lag = src.rng, src.cmd_seq, src.view_lag
 	dst.shot_count = src.shot_count
 	dst.primary_choice, dst.secondary_choice = src.primary_choice, src.secondary_choice

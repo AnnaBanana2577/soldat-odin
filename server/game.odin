@@ -461,10 +461,13 @@ leave :: proc(g: ^Game, host: ^Host, slot: u8) {
 
 // ---- the world ----
 
-// The things, the bullets and the round, and then the hits become wounds, here and
-// nowhere else. What the wounds cause (a death, a dropped gun) joins the events.
+// The corpses, the things, the bullets and the round, and then the hits become wounds,
+// here and nowhere else. What the wounds cause (a death, a dropped gun) joins the
+// events. The corpses are stepped here as well as on every client, from the same word,
+// so that a bullet meets a body on the server as it does on the screen that fired it.
 step_world :: proc(g: ^Game) {
 	w := &g.world
+	sim.ragdolls_update(&g.ctx, w, &g.events)
 	sim.things_update(&g.ctx, w, &g.events)
 	sim.bullets_update(&g.ctx, w, &g.events)
 	sim.round_tick(&g.ctx, w, &g.events)

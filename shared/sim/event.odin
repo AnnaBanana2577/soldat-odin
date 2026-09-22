@@ -26,6 +26,7 @@ Event :: union {
 	Weapon_Drop,
 	Thing_Hit,
 	Poly_Effect,
+	Corpse_Hit,
 	Match_End,
 }
 
@@ -60,6 +61,11 @@ Weapon_Drop :: struct { player: u8, weapon: Weapon_Id, ammo: i32, thrown: bool }
 Thing_Hit :: struct { thing: Thing_Style, pos, vel: Vec2, part: u8 }
 Match_End :: struct { winner: Team }
 Poly_Effect :: struct { target: u8, type: Poly_Type, pos: Vec2, spark: bool } // a hurting, lava, regenerating or exploding poly touched
+// A corpse's point struck the map hard enough to be heard: how far it fell in that
+// tick, and how many times the body had already landed (DeadCollideCount), which is
+// what the original gates the thud and the bone crack on. Never leaves the machine
+// that made it: every client runs its own corpses.
+Corpse_Hit :: struct { target: u8, pos: Vec2, fall: f32, count: u8 }
 
 MAX_EVENTS :: 256
 

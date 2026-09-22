@@ -77,6 +77,11 @@ view_advance :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, me: u8) {
 		v.prev[i] = s.pos
 		before, after := view_around(v, i, v.tick)
 		if before == nil && after == nil do continue
+		// A corpse is where its own body has it. The word of a dead soldier is the
+		// server's half alone, so the position in it is nothing; the corpse is run here
+		// from the state that half does carry (sim/ragdoll.odin), and put back after
+		// the word has been taken.
+		defer if s.dead do s.pos = w.ragdolls[i].active ? w.ragdolls[i].pos[sim.RAGDOLL_HEAD] : s.death_pos
 		if before == nil { // only word of it is still to come: hold where it was
 			v.prev[i] = after.soldier.pos
 			view_show(ctx, &s, after, after, 0)

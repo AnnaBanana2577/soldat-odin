@@ -208,9 +208,10 @@ collider_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, neare
 	return {}, false
 }
 
-// The bullet's path against the living soldiers' poses, nearest first. A hit is a
-// Blood and a Hit event with the damage this weapon does to that part and the
-// knockback; the bullet stops, pierces or explodes as its style says.
+// The bullet's path against the soldiers' poses, nearest first; the corpses are among
+// them, met where their ragdolls lie. A hit is a Blood and a Hit event with the damage
+// this weapon does to that part and the knockback; the bullet stops, pierces or
+// explodes as its style says.
 @(private = "file")
 soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, nearest: f32, events: ^Events) -> (hit_point: Vec2, hit: bool) {
 	if b.style == .Arrow && b.timeout <= ARROW_RESIST do return
@@ -229,13 +230,15 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 	case:               owner_vulnerable_after = BULLET_TIMEOUT - 20
 	}
 
-	// candidates nearest first
+	// candidates nearest first; the corpses are targets too, so long as the body has
+	// been started (a soldier the server has just killed has none for a tick)
 	order: [MAX_PLAYERS]int
 	dists: [MAX_PLAYERS]f32
 	count := 0
 	for i in 0 ..< MAX_PLAYERS {
 		s := target_soldier(w, soldiers, b.owner, i)
-		if !s.active || s.dead || i == int(b.hit_body) do continue // TODO corpses are targets too (ragdoll)
+		if !s.active || i == int(b.hit_body) do continue
+		if w.soldiers[i].dead && !w.ragdolls[i].active do continue
 		if i == int(b.owner) && b.timeout >= owner_vulnerable_after do continue
 		d := vec2_dot(b.pos - s.pos, b.pos - s.pos)
 		j := count
@@ -263,7 +266,10 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			end = b.pos + b.vel
 		}
 
-		pose := soldier_pose(ctx.anims, target, target.pos)
+		// A corpse is met where its ragdoll lies this tick, not where it was `b.lag`
+		// ticks ago: it moves slowly, and no history is kept of it.
+		corpse := w.soldiers[ti].dead
+		pose := corpse ? ragdoll_pose(&w.ragdolls[ti], 1) : soldier_pose(ctx.anims, target, target.pos)
 		part := -1
 		point: Vec2
 		best := max(f32)
@@ -280,7 +286,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 		if target.cease_fire_counter >= 0 do continue
 
 		push: Vec2
-		if b.style != .Frag_Grenade && b.style != .Flame && b.style != .Arrow do push = b.vel * info.push
+		if !corpse && b.style != .Frag_Grenade && b.style != .Flame && b.style != .Arrow do push = b.vel * info.push
 		modifier := hitbox_modifier(info, part)
 		wound :: proc(events: ^Events, b: ^Bullet, ti: int, amount: f32, part: int, point, push: Vec2) {
 			emit(events, Hit{shooter = b.owner, target = u8(ti), weapon = b.weapon, amount = amount, part = u8(part + 1), pos = point, push = push})
@@ -294,8 +300,13 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			wound(events, b, ti, speed * b.hit_multiply * modifier, part, point, push)
 			b.hit_body = i8(ti)
 			// a punched enemy starts throwing its gun away
-			if b.style == .Punch && (target.team == .None || target.team != owner.team) && target.weapon.id != .Bow && target.weapon.id != .Bow2 {
+			if !corpse && b.style == .Punch && (target.team == .None || target.team != owner.team) && target.weapon.id != .Bow && target.weapon.id != .Bow2 {
 				anim_apply(ctx.anims, &w.soldiers[ti].body, .Throw_Weapon, 11) // the live one, not the frame
+			}
+			// through a corpse, barely slowed
+			if corpse {
+				b.vel *= 0.9
+				continue
 			}
 			// fast bullets pierce and go on to the next soldier
 			if speed > 23 {
@@ -308,6 +319,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			}
 			bullet_end(w, b, index, events, point)
 		case .Frag_Grenade:
+			if corpse do continue // grenades roll through corpses
 			explode(ctx, w, b, index, .Frag, ti, part, events)
 			bullet_end(w, b, index, events)
 		case .Arrow:
@@ -317,6 +329,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			wound(events, b, ti, vec2_length(b.vel) * b.hit_multiply * modifier, part, point, push)
 			bullet_end(w, b, index, events, point)
 		case .M79, .Flame_Arrow, .LAW:
+			if corpse do continue // rockets fly through corpses
 			explode(ctx, w, b, index, .M79, ti, part, events)
 			b.pos = point
 			bullet_end(w, b, index, events)
@@ -338,6 +351,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			bullet_end(w, b, index, events)
 		case .Thrown_Knife:
 			wound(events, b, ti, vec2_length(b.vel) * b.hit_multiply * 0.01, part, point, push)
+			if corpse do continue // a thrown knife goes through a corpse rather than sticking in it
 			bullet_end(w, b, index, events)
 		}
 		return point, true

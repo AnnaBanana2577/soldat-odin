@@ -60,7 +60,7 @@ The server's tick, server/game.odin, reads the same way:
 for each tick owed:
   step_soldiers   every soldier one tick on: the bots played, the players guessed
   receive         the clients' word over the guesses; their shots, checked
-  step_world      the things, every bullet, the round; the hits become wounds
+  step_world      the corpses, the things, every bullet, the round; the hits become wounds
   send            what changed, what was decided, the soldiers and the bullets born
 sleep until the next tick
 ```
