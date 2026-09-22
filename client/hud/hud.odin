@@ -215,7 +215,6 @@ draw :: proc(h: ^Hud, g: ^game.Game, r: ^render.Render, camera: ^render.Camera, 
 	vote_reason_draw(h, sc)
 	if mine.active && mine.dead do draw_respawn(h, sc, mine)
 	names_draw(h, g, sc, camera, alpha)
-	if alive do cease_fire_draw(h, g, sc, camera, alpha)
 	if scores do scoreboard_draw(h, g, sc)
 	if !ended do big_draw(h, sc)
 

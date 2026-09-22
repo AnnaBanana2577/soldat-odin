@@ -236,8 +236,10 @@ what you see while making a thing is what the game will show.
   team. Lines show in the top left for five seconds (the original's console), and a
   short one over its speaker's head for as long as it takes to read.
 - The weapons menu (the original's limbo menu): it opens when I die and when I join,
-  and goes away when my soldier first moves; Tab opens it by hand. Names come from
-  the server's roster; the bots have names.
+  stays up over the spawn that follows, and goes away when my soldier first moves; Tab
+  opens it by hand. What is picked in a life I have not moved in is in my hands at
+  once, on my own screen and on the server's word alike; after that it is for the next
+  spawn. Names come from the server's roster; the bots have names.
 
 ## Licence
 

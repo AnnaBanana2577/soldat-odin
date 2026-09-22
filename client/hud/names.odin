@@ -1,14 +1,12 @@
 #+private
 package hud
 
-import "core:fmt"
 import rl "vendor:raylib"
 import "../game"
 import "../render"
 import "../../shared/sim"
 
-// Names over the players, and the count of the spawn protection over mine
-// (RenderPlayerNames and RenderCeaseFireCounter).
+// Names over the players (RenderPlayerNames).
 //
 // The original shows a name only for a team mate, and only while it is off the screen:
 // the name is then held against the edge it went out by, which is how a player knows
@@ -55,16 +53,4 @@ name_draw :: proc(h: ^Hud, g: ^game.Game, sc: Screen, camera: ^render.Camera, al
 	else if s.dead do color = NAME_DEAD
 	color.a = faded
 	text(h, sc, .Small, line, x, y, color)
-}
-
-// The seconds of spawn protection left, over my soldier's head. The original draws this
-// in survival mode alone, which this game has not got; here it shows whenever the
-// protection is on.
-cease_fire_draw :: proc(h: ^Hud, g: ^game.Game, sc: Screen, camera: ^render.Camera, alpha: f32) {
-	s := &g.world.soldiers[g.me]
-	if !s.active || s.dead || s.cease_fire_counter < 0 do return
-	drawn := game.drawn_pos(g, int(g.me), alpha)
-	pose := sim.soldier_pose(g.ctx.anims, s, drawn)
-	at := render.world_to_screen(camera, pose[8] - {2, 15}) / sc.scale
-	text(h, sc, .Small, fmt.tprint(s.cease_fire_counter / sim.TICK_RATE + 1), at.x, at.y, {0x71, 0xF9, 0x81, 238})
 }

@@ -5,8 +5,8 @@ measured; this says what it does not do yet. Checked against the code on 2026-09
 
 x Bots bullets are invisible
 x Death ragdolls have weird physics currently
-- Weps menu after spawn not working
-- Spawn timer remove
+x Weps menu after spawn not working
+x Spawn timer remove
 - Flag throws
 - Roll/flip parity with opensoldat
 - HUD parity
@@ -32,11 +32,14 @@ x Death ragdolls have weird physics currently
 - Netcode fixes
 - Lobby
 - Demos
+- File transfer
 - Map editor
 - Editor for po and poa
 - -----
 - Code refactor
 - GitHub workflows for packaging
+- Scripting via lua
+- rcon for servers
 
 ## Netcode
 
@@ -128,8 +131,13 @@ what is in; this is the rest of it.
   image draws it, so a player can change the look of the lot.
 - Exit to menu, off the escape menu, closes the game: there is no main menu here to
   return to, and no server browser to return to it from.
-- The cease fire count over one's own head is drawn whenever the spawn protection is
-  on; the original draws it in survival mode alone, which this game has not got.
+- The cease fire count over one's own head (RenderCeaseFireCounter) is gone, the
+  original putting it up in survival mode alone and this game not having that mode. It
+  belongs with survival when that lands, over skeleton point 9 less (2, 15), reading
+  the counter in whole seconds and one more.
+- The weapons menu cannot be locked. The original's weapons key, pressed while the menu
+  is up, sets LimboLock and says "Weapons menu disabled": the menu then stops opening
+  by itself on death until the key turns it back on.
 
 ## Tests and tools
 

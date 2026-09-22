@@ -34,6 +34,18 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 	if e.has_owned do sim.soldier_copy_owned(g.ctx.anims, mine, &e.soldier)
 	if e.has_rest do sim.soldier_copy_rest(mine, &e.soldier)
 
+	// The weapons menu's pick, held over the server's word until that word carries it.
+	// A pick reaches the server as an Act and not as a command, so the replay below
+	// cannot make it again; without this the gun I just chose would go back to the old
+	// one for half a round trip and then change a second time. It is mine to say only
+	// while the life is one I have not moved in, which is the same rule the server arms
+	// me under (server/game.odin's Loadout).
+	if mine.active && !mine.dead && mine.spawn_still {
+		if mine.weapon.id != g.primary || mine.secondary.id != g.secondary {
+			sim.soldier_arm(&g.ctx, mine, g.primary, g.secondary)
+		}
+	}
+
 	for len(g.pending) > 0 && g.pending[0].seq <= ack do ordered_remove(&g.pending, 0)
 	// the bullets of the commands it has not run: the replay makes them again
 	for &b in g.world.bullets {

@@ -308,9 +308,12 @@ receive_act :: proc(g: ^Game, host: ^Host, slot: u8, m: net.Act) {
 	case .Join_Team:
 		join_team(g, host, slot, m.team)
 	case .Loadout:
-		// for its next spawn; in a life it has not moved in yet its client has armed it already
 		if m.weapon in sim.PRIMARY_WEAPONS && m.second in sim.SECONDARY_WEAPONS {
 			s.primary_choice, s.secondary_choice = m.weapon, m.second
+			// and into its hands at once in a life it has not moved in yet, which is
+			// what its client has already done with it: a soldier's weapons are its
+			// own client's to say for as long as the menu is still up
+			if !s.dead && s.spawn_still do sim.soldier_arm(&g.ctx, s, m.weapon, m.second)
 		}
 	}
 }
