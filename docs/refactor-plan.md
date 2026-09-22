@@ -160,8 +160,13 @@ The bots seed from the clock, so no two runs fight alike. The useful output of t
 stage is therefore not a number but a division.
 
 **Gate on these**, which barely move: shots seen against shots ruled, exact in four runs
-of five and off by one in the fifth; mean prediction error, 0.00 to 0.03; uplink, 3.2 to
+of five and off by one in the fifth; mean prediction error, 0.00 to 0.03; uplink, 3.0 to
 3.3 KB/s; three ticks of interpolation and two commands waiting, constant throughout.
+
+The uplink band is wider than these five runs showed. They landed 3.2 to 3.3 and the
+next four stages read 3.0 to 3.3 without touching anything a client sends, so the table
+above is a narrow sample rather than a tight number. Five runs is enough to say what a
+metric roughly does and not enough to fix its edges.
 
 **Do not gate on these**, which swing with the bots: hits taken, seen against ruled,
 which ran 150, 100, 105, 109 and 119 per cent; worst-case prediction error, 0.41 to
