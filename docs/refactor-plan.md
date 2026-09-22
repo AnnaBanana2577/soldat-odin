@@ -113,7 +113,8 @@ nothing.
 
 ## Order, and why
 
-Stage 6 first, though it is numbered last: it is self-contained, changes no protocol,
+Stage 6 first, then Stage 3, since the HUD cannot move under game/ until the outbox has
+left it. Stage 6 is self-contained, changes no protocol,
 and every folder move afterwards assumes it. Then 1, 2 and 3, the shared core, each one
 making the next smaller. Then 4 and 5, the client's shape, which need 3 to have emptied
 the `Game` structs first. The folders move last, when the imports already obey them.
@@ -172,30 +173,41 @@ above would be a subsystem importing the layer above it. The fix is small: both 
 Do this before moving any folders. Moving them first would encode a layering the imports
 do not obey.
 
-## The HUD lives under game/
+## The HUD lives under game/, and imports nothing from it
 
-Decided: the HUD is the running game's, not a subsystem. It sits under `game/`, and the
-server never learns it exists.
+The HUD is the running game's, so it sits under `game/` and the server never learns it
+exists. It stays its own package, and after Stage 3 it does not import `game` at all.
 
-Nesting the folder does not by itself settle the imports. `client/game/hud/` is still
-its own package, so if `Client_Game` holds a `Hud` field then `game` imports `hud` while
-`hud` imports `game` (`choose_team`, `vote_yes`, `ask_map`, `say`, and `game.Game` in
-twenty-nine places). A directory inside another is not an exemption from that.
+It looks at first as though it must. `client/hud` names `game` in forty-five places:
+`game.Game` as a parameter type twenty-nine times, and eight procedures called fourteen
+times between them. But look at what those procedures are:
 
-So there are two shapes, and the choice is about packages, not folders:
+	choose_team :: proc(g: ^Game, team: sim.Team) { append(&g.acts, net.Act{...}) }
+	say         :: proc(g: ^Game, line: string, team: bool) { append(&g.said, chat) }
+	call_kick   :: proc(g: ^Game, slot: u8, reason: string) { append(&g.called, v) }
+	ask_map     :: proc(g: ^Game, index: int) { append(&g.asked, net.Map_Query{...}) }
 
-**One package.** `client/game/` is a single package whose files include `hud.odin`,
-`kill_feed.odin`, `scoreboard.odin` beside `world.odin` and `predict.odin`, with
-procedures named for what they act on: `hud_draw`, `view_advance`, `game_tick`. The
-cycle cannot arise, `Client_Game` owns its HUD outright, and it is how `shared/sim`
-already reads. The cost is that the HUD and the rest of the game stop being able to hide
-from each other behind `#+private`.
+Seven of the eight are appends to the outbox and touch no world state whatever. The HUD
+is not depending on the game; it is reaching through `Game` to get at the outbox,
+because the outbox is a field of `Game` today. Stage 3 takes the outbox out. After that
+those calls go to the connection layer and the dependency is simply gone.
 
-**Two packages, one direction.** `client/game/hud/` stays its own package and keeps
-importing `game`, but `Client` owns the `Hud` rather than `Client_Game`. The folder
-still says the HUD belongs to the game; the imports still point one way. The cost is
-that ownership and layout disagree, which is the thing refactor.md revised itself to
-avoid.
+What is left is small and goes the right way:
 
-Taking the first. It follows from the naming convention rather than fighting it, and the
-`#+private` boundary between the HUD and the game is worth less than the ownership is.
+- `name_of(g, slot)` is a roster lookup. The roster is client state, not world state,
+  and belongs beside the outbox.
+- `drawn_pos(g, slot, alpha)` is one line over `view_drawn_pos(view, world, slot,
+  alpha)`, so what the HUD wants already exists at the level it wants it.
+- `^game.Game` as a parameter becomes the world, the match and the view: `shared/sim`
+  types, which the HUD may import freely.
+- Two of the eight do a little more than append. `vote_yes` also clears `vote.active`,
+  which is local interface state and belongs to the HUD anyway. `choose_weapons` also
+  arms the soldier when it has not moved since spawning, which is the one genuine call
+  into the simulation, and `sim.soldier_arm` is already public.
+
+So the HUD ends up importing `shared/sim`, `shared/net` and `render`, and nothing above
+it. `Client_Game` can own a `Hud` field with no cycle, which is what refactor.md wanted
+and could not see a way to.
+
+This changes the order: **Stage 3 must come before the HUD moves under `game/`.** Moving
+it first would mean importing `game` for an outbox that is about to leave.
