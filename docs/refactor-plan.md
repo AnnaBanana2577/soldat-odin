@@ -271,7 +271,8 @@ Applied here:
 
 - `render`, `audio`, `input`, `net`: after Stage 6 each imports only `shared/`, so each
   is isolable and keeps its package, under `subsystems/`.
-- `editor`: imports `pms`, `sim` and `render`, all at or below it. Isolable, own package.
+- `editor`: imports `pms`, `sim` and `render`, all at or below it. Isolable, so it
+  keeps its own package.
 - **`hud`: not isolable. A file in `game/`.**
 
 The HUD reads sixteen fields of `Game` and thirteen of them are `Client_Game` state
