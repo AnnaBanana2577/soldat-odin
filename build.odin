@@ -20,6 +20,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 
 BUILD_DIR :: "build"
 ASSETS_DIR :: "assets"
@@ -131,7 +132,11 @@ dev :: proc(opts: Options) -> int {
 		return 1
 	}
 	defer stop(server)
-	return run(argv({exe("client"), "-cl_base", assets(), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
+	code := run(argv({exe("client"), "-cl_base", assets(), "-cl_join", "127.0.0.1", "-cl_port", fmt.tprint(opts.port)}, opts.extra))
+	// the server says what it ruled only after it notices the client has gone, a tick or
+	// more later; killing it at once loses that line and with it the hits to compare
+	time.sleep(500 * time.Millisecond)
+	return code
 }
 
 // The map editor: the client, pointed at the assets, with no server and no soldier.
