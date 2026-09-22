@@ -128,6 +128,7 @@ so it wants a quiet moment; 2 is the safest change in the plan and can go whenev
 
 **The folders move at the end**, when the imports already obey the layering the names
 claim. Moving them earlier writes a promise the code has not made yet.
+
 ## The gate on every stage
 
 	odin run build.odin -file -- check
