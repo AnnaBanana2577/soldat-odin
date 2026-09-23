@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // Corpses: a dead soldier's gostek skeleton run as a Verlet particle system, from
 // the dead-soldier branches of Sprites.pas (Update, Die, CheckSkeletonMapCollision)
 // and Parts.pas, by way of the old Odin port. A ragdoll starts from the pose at the
@@ -134,9 +136,9 @@ ragdoll_step :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	for c, ci in skeleton.constraints {
 		if ci in r.torn do continue
 		a, b := c[0], c[1]
-		rest := vec2_length(skeleton.points[b] - skeleton.points[a])
+		rest := geom.vec2_length(skeleton.points[b] - skeleton.points[a])
 		delta := r.pos[b] - r.pos[a]
-		length := vec2_length(delta)
+		length := geom.vec2_length(delta)
 		if length == 0 do continue
 		diff := (length - rest) / length
 		r.pos[a] += delta * (0.5 * diff)
@@ -165,7 +167,7 @@ ragdoll_collide :: proc(ctx: ^Context, w: ^World, index: u8, i: int, events: ^Ev
 		if !soldier_collides_with(s, poly.type) || !point_in_poly_edges(probe, poly) do continue
 		if bg_test(level, &s.bg, idx) do continue
 		normal, dist, _ := closest_perpendicular(poly, probe)
-		r.pos[i] = r.old_pos[i] - vec2_normalize(normal) * dist
+		r.pos[i] = r.old_pos[i] - geom.vec2_normalize(normal) * dist
 		// the thud of a body landing, for whoever is listening; the count quiets it
 		if fall := abs(r.pos[i].y - r.old_pos[i].y); fall > CORPSE_THUD_FALL && r.hits < CORPSE_THUD_HITS {
 			emit(events, Corpse_Hit{target = index, pos = r.pos[i], fall = fall, count = r.hits})
@@ -182,7 +184,7 @@ ragdoll_collide :: proc(ctx: ^Context, w: ^World, index: u8, i: int, events: ^Ev
 		if poly.type == .Doesnt || poly.type == .Only_Bullets || !point_in_poly_edges(probe, poly) do continue
 		if bg_test(level, &s.bg, idx) do continue
 		normal, dist, _ := closest_perpendicular(poly, probe)
-		r.pos[i] = r.old_pos[i] - vec2_normalize(normal) * dist
+		r.pos[i] = r.old_pos[i] - geom.vec2_normalize(normal) * dist
 	}
 }
 
@@ -193,9 +195,9 @@ ragdoll_explosion :: proc(w: ^World, index: u8, at: Vec2, radius: f32) {
 	if !r.active do return
 	for i in 0 ..< 16 {
 		a := at - r.pos[i]
-		dist2 := vec2_dot(a, a)
+		dist2 := geom.vec2_dot(a, a)
 		if dist2 >= radius * radius do continue
-		r.old_pos[i] += a * ((1 / (sqrt_f32(dist2) + 1)) * EXPLOSION_DEADIMPACT_MULTIPLY)
+		r.old_pos[i] += a * ((1 / (geom.sqrt_f32(dist2) + 1)) * EXPLOSION_DEADIMPACT_MULTIPLY)
 	}
 }
 

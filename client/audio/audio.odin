@@ -7,6 +7,7 @@ import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
 import "../game"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // Sounds, from Sound.pas and the play sites in Sprites.pas and Bullets.pas by way of
@@ -105,7 +106,7 @@ tick :: proc(a: ^Audio, g: ^game.Game, camera: sim.Vec2) {
 @(private = "file")
 place :: proc(a: ^Audio, at: sim.Vec2, distant: bool) -> (gain, pan: f32, audible: bool) {
 	d := at - a.listener
-	dist := sim.vec2_length(d) / SOUND_MAXDIST
+	dist := geom.vec2_length(d) / SOUND_MAXDIST
 	if distant do dist = dist > 1 ? dist - 1 : 1 - 2 * dist
 	if a.ringing > 0 do dist += (1 - dist) * math.sqrt(f32(a.ringing) / 280)
 	if dist > 1 do return 0, 0, false
@@ -133,7 +134,7 @@ sample :: proc(a: ^Audio, name: string) -> ^Sample {
 // plays its distant sample, which has its own fade.
 sound_play :: proc(a: ^Audio, name: string, at: sim.Vec2, distant := false) {
 	if !a.ready || name == "" do return
-	if !distant && sim.vec2_length(at - a.listener) > SOUND_MAXDIST / 2 {
+	if !distant && geom.vec2_length(at - a.listener) > SOUND_MAXDIST / 2 {
 		if alt := distant_sample(a, name); alt != "" do sound_play(a, alt, at, distant = true)
 	}
 	gain, pan, audible := place(a, at, distant)
@@ -268,7 +269,7 @@ audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
 		else do sound_play(a, FIRE_SOUNDS[v.weapon], v.pos)
 	case sim.Explosion:
 		me := &w.soldiers[g.me]
-		if me.active && me.health > -50 && sim.vec2_length(v.pos - a.listener) < GRENADE_EFFECT_DIST {
+		if me.active && me.health > -50 && geom.vec2_length(v.pos - a.listener) < GRENADE_EFFECT_DIST {
 			a.ringing = GRENADE_EFFECT_TIME
 			sound_flat(a, "hum.wav")
 		}
@@ -280,7 +281,7 @@ audio_event :: proc(a: ^Audio, e: sim.Event, g: ^game.Game) {
 		}
 		sound_play(a, name, v.pos)
 		for &s in w.soldiers {
-			if s.active && !s.dead && s.team != .Spectator && sim.vec2_length(s.pos - v.pos) < v.radius do sound_play(a, "explosion-erg.wav", s.pos)
+			if s.active && !s.dead && s.team != .Spectator && geom.vec2_length(s.pos - v.pos) < v.radius do sound_play(a, "explosion-erg.wav", s.pos)
 		}
 	case sim.Cluster_Split:  sound_play(a, "clustergrenade.wav", v.pos)
 	case sim.Grenade_Bounce: sound_play(a, "grenade-bounce.wav", v.pos)

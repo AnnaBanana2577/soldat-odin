@@ -2,6 +2,7 @@ package sim
 
 import "core:strconv"
 import "core:strings"
+import "../geom"
 
 // The skeleton pose: where each of the gostek's points is for a soldier, from its
 // legs and body animation frames, its stance and its aim. Gameplay only moves the
@@ -80,7 +81,7 @@ soldier_pose :: proc(anims: ^Anims, s: ^Soldier, pos: Vec2) -> (p: Pose) {
 	}
 
 	// The head and arms turn toward the aim point.
-	head := vec2_normalize(p[11] - s.aim)
+	head := geom.vec2_normalize(p[11] - s.aim)
 	p[11] = p[8] + dir * Vec2{-head.y, head.x} * 0.1
 
 	#partial switch s.body.id {
@@ -89,8 +90,8 @@ soldier_pose :: proc(anims: ^Anims, s: ^Soldier, pos: Vec2) -> (p: Pose) {
 	     .Groin, .Piss, .Mercy, .Mercy2, .Victory, .Own, .Melee:
 	case:
 		throwing := s.body.id == .Throw
-		p[14] = p[15] + vec2_normalize(p[14] - s.aim) * (throwing ? -5 : -7)
-		p[18] = p[15] + {0, -4} + vec2_normalize(p[18] - s.aim) * (throwing ? -6 : -8)
+		p[14] = p[15] + geom.vec2_normalize(p[14] - s.aim) * (throwing ? -5 : -7)
+		p[18] = p[15] + {0, -4} + geom.vec2_normalize(p[18] - s.aim) * (throwing ? -6 : -8)
 	}
 	return
 }

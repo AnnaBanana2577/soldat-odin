@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // The control state machines: input -> animation state -> forces.
 //
 // A soldier is driven by two coupled state machines, both using Anim_Id as the state:
@@ -144,21 +146,21 @@ cover_check :: proc(ctx: ^Context, w: ^World, index: u8) {
 	s.collider_distance = 255
 
 	pose := soldier_pose(ctx.anims, s, s.pos)
-	arm := vec2_normalize(pose[14] - pose[15]) * 8
+	arm := geom.vec2_normalize(pose[14] - pose[15]) * 8
 	probe := pose[11] - {0, 5} + arm
 
 	for c in ctx.level.colliders {
 		if !c.active do continue
-		if d := vec2_length(probe - c.pos); d < c.radius {
-			s.collider_distance = u8(round_half_even(min(d, 253)))
+		if d := geom.vec2_length(probe - c.pos); d < c.radius {
+			s.collider_distance = u8(geom.round_half_even(min(d, 253)))
 			break
 		}
 	}
 	if s.team == .None || s.team == .Spectator do return
 	for &other, i in w.soldiers {
 		if u8(i) == index || !other.active || other.team != s.team || other.stance != .Crouch do continue
-		if d := vec2_length(probe - other.pos); d < SPRITE_RADIUS {
-			s.collider_distance = u8(round_half_even(min(d, 253)))
+		if d := geom.vec2_length(probe - other.pos); d < SPRITE_RADIUS {
+			s.collider_distance = u8(geom.round_half_even(min(d, 253)))
 			break
 		}
 	}

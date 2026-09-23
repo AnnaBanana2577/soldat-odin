@@ -5,6 +5,7 @@ import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // The things as drawn, from TThing.Render and TThing.PolygonsRender: the flag's
@@ -140,7 +141,7 @@ draw_parachute :: proc(a: ^Things_Art, t: ^sim.Thing, p: [4]sim.Vec2, w: ^sim.Wo
 		if i == 1 do angle -= 5 * math.PI / 180
 		draw_sprite(a.rope, p[3] - {0, 0.55}, {0, a.rope.height / 2}, {1, 1}, angle, rl.WHITE)
 	}
-	span := sim.vec2_length(p[1] - p[2]) / 45.83
+	span := geom.vec2_length(p[1] - p[2]) / 45.83
 	if span > 2 do return
 	color := rl.WHITE
 	if t.owner > 0 do color = gostek_color(.Main, &w.soldiers[t.owner - 1])

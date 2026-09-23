@@ -6,6 +6,7 @@ import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // The gostek: layered sprites pinned to the skeleton pose, from GostekGraphics.pas.
@@ -207,7 +208,7 @@ gostek_draw :: proc(g: ^Gostek, s: ^sim.Soldier, pose: ^sim.Pose, corpse: bool) 
 			if part.flip do cy = 1 - part.cy
 			else do sy = -1
 		}
-		if part.flex > 0 do sx = min(1.5, sim.vec2_length(along) / part.flex)
+		if part.flex > 0 do sx = min(1.5, geom.vec2_length(along) / part.flex)
 		tint := gostek_color(part.color, s)
 		if part.blood do tint.a = bleeding
 		if part.nade > 0 do tint.a = u8(0.75 * f32(tint.a)) // ALPHA_NADES

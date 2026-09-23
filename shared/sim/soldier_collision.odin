@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // The soldier against the map, in the original's order: the head's two points, the
 // legs' two points (only the second if the first missed), the swept circle, the
 // corners. What a special poly does to the soldier is a Hit or a Poly_Effect event,
@@ -145,13 +147,13 @@ check_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2, area:
 
 		normal, dist, _ := closest_perpendicular(poly, pos)
 		push := normal * dist
-		speed := vec2_length(s.vel)
-		if vec2_length(push) > speed do push = vec2_normalize(push) * speed
+		speed := geom.vec2_length(s.vel)
+		if geom.vec2_length(push) > speed do push = geom.vec2_normalize(push) * speed
 
 		if area == 0 || (area == 1 && (s.vel.y < 0 || s.vel.x > SLIDELIMIT || s.vel.x < -SLIDELIMIT)) {
 			s.old_pos = s.pos
 			s.pos -= push
-			if poly.type == .Bouncy do push = vec2_normalize(push) * (poly.bounciness * speed)
+			if poly.type == .Bouncy do push = geom.vec2_normalize(push) * (poly.bounciness * speed)
 			s.vel -= push
 		}
 		if area == 0 do apply_ground_friction(w, s, poly, normal)
@@ -202,7 +204,7 @@ check_radius_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2
 	level := ctx.level
 	s := &w.soldiers[index]
 	spos := at + {0, -3}
-	steps := int(vec2_length(s.vel))
+	steps := int(geom.vec2_length(s.vel))
 	if steps == 0 do steps = 1
 	step := s.vel * (1 / f32(steps))
 
@@ -220,7 +222,7 @@ check_radius_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2
 				if bg_test(level, &s.bg, idx) do continue
 				if !has_collided do handle_special_poly(ctx, w, index, t, probe, events)
 				normal, _, edge := closest_perpendicular(poly, spos)
-				dist := point_line_distance(poly.verts[edge], poly.verts[(edge + 1) % 3], probe)
+				dist := geom.point_line_distance(poly.verts[edge], poly.verts[(edge + 1) % 3], probe)
 				s.pos = s.old_pos
 				s.vel = s.forces - normal * dist
 				return true
@@ -238,10 +240,10 @@ check_map_vertices_collision :: proc(ctx: ^Context, w: ^World, index: u8, pos: V
 		poly := &level.polys[idx]
 		if !soldier_collides_with(s, poly.type) do continue
 		for vert in poly.verts {
-			if vec2_length(vert - pos) >= r do continue
+			if geom.vec2_length(vert - pos) >= r do continue
 			if bg_test(level, &s.bg, idx) do continue
 			if !has_collided do handle_special_poly(ctx, w, index, poly.type, pos, events)
-			s.pos += vec2_normalize(pos - vert)
+			s.pos += geom.vec2_normalize(pos - vert)
 			return true
 		}
 	}

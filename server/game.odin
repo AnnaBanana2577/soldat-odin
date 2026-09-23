@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:time"
 import enet "vendor:ENet"
 import "../shared/net"
+import "../shared/geom"
 import "../shared/sim"
 
 // The server's world is the one that decides (world.authority): it runs every soldier,
@@ -604,9 +605,9 @@ in_view :: proc(eye, point: sim.Vec2) -> bool {
 // Could a bullet born at `pos` flying along `vel` come into the view around `eye`:
 // does its line of flight pass near?
 could_reach :: proc(eye, pos, vel: sim.Vec2) -> bool {
-	dir := sim.vec2_normalize(vel)
-	along := max(sim.vec2_dot(eye - pos, dir), 0)
-	return sim.vec2_length(eye - (pos + dir * along)) <= SHOT_REACH
+	dir := geom.vec2_normalize(vel)
+	along := max(geom.vec2_dot(eye - pos, dir), 0)
+	return geom.vec2_length(eye - (pos + dir * along)) <= SHOT_REACH
 }
 
 EVERYONE :: NO_SLOT

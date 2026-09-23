@@ -34,6 +34,8 @@
 //   round (the clock), event
 package sim
 
+import "../geom"
+
 TICK_RATE :: 60
 TICK      :: 1.0 / f64(TICK_RATE)
 
@@ -41,7 +43,7 @@ MAX_PLAYERS :: 32
 MAX_BULLETS :: 512
 MAX_THINGS  :: 64
 
-Vec2 :: [2]f32
+Vec2 :: geom.Vec2
 
 Button :: enum u8 {
 	Left, Right, Jump, Crouch, Prone, Jet, Fire, Throw, Reload, Change, Suicide, Drop, Flag_Throw,

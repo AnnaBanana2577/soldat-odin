@@ -1,6 +1,7 @@
 package game
 
 import "../../shared/net"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // My own soldier, predicted. The server runs it, on the commands I send; I run the same
@@ -66,8 +67,8 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 	// where the server put me against where I had myself: felt, not seen
 	if was_alive && mine.active && !mine.dead {
 		off := drawn - mine.pos
-		g.error = sim.vec2_length(off) > ERROR_SNAP ? {} : off
-		g.error_now = sim.vec2_length(g.error)
+		g.error = geom.vec2_length(off) > ERROR_SNAP ? {} : off
+		g.error_now = geom.vec2_length(g.error)
 		g.error_worst = max(g.error_worst, g.error_now)
 		g.error_sum += f64(g.error_now)
 		g.error_count += 1
@@ -82,7 +83,7 @@ reconcile :: proc(g: ^Game, e: ^net.Entry, tick: u32, ack: u32) {
 // does not move there); too many and everything I press waits.
 predict_tick :: proc(g: ^Game) {
 	g.error *= ERROR_KEPT
-	if sim.vec2_length(g.error) < 0.05 do g.error = {}
+	if geom.vec2_length(g.error) < 0.05 do g.error = {}
 
 	g.depth += (f64(g.server_depth) - g.depth) * DEPTH_EASE
 	adjust := (g.clock_target - g.depth) * CLOCK_GAIN

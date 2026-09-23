@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:path/filepath"
 import rl "vendor:raylib"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // The particle effects: chips off walls, blood, smoke, explosions. From Sparks.pas
@@ -115,7 +116,7 @@ spark_collide :: proc(level: ^sim.Level, spark: ^Spark) {
 		}
 		if !sim.point_in_poly_edges(probe, poly) do continue
 		normal, dist, _ := sim.closest_perpendicular(poly, probe)
-		spark.vel -= sim.vec2_normalize(normal) * dist
+		spark.vel -= geom.vec2_normalize(normal) * dist
 		spark.vel *= SPARK_SURFACECOEF
 		return
 	}

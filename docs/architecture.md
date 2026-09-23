@@ -8,7 +8,9 @@ shared/sim/  the simulation, shared, one file per object: level (the map: loadin
              antics, soldier_collision), bullet (bullet_collision, explosion), damage
              (the one place health changes), thing (flag, kit, dropped_gun, parachute,
              stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
-             union), bot (the brain of the server's bots and of the test client), math
+             union), bot (the brain of the server's bots and of the test client), rand
+shared/geom/ Vec2 and the arithmetic the sim shares: the vector procedures, the distances,
+             the banker's rounding, on one float path so every world computes the same
 shared/cvar/ the settings: a name, a value, a default and a line of help, set from
              config.cfg and the command line
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,

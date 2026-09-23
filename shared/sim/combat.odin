@@ -1,6 +1,7 @@
 package sim
 
 import "core:math"
+import "../geom"
 
 // The weapon in hand: firing with the spread and bink, the reloads, changing,
 // throwing grenades and the gun, the punch and the rifle butt. Ported from
@@ -48,7 +49,7 @@ combat_control :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	if s.stance == .Stand && fire && s.cease_fire_counter < 0 && weapon.id != .None && weapon.id != .Knife && weapon.id != .Chainsaw {
 		for &other, i in w.soldiers {
 			if u8(i) == index || !other.active || other.dead || other.stance != .Stand do continue
-			if vec2_length(s.pos - other.pos) < MELEE_DIST do anim_apply(anims, body, .Melee)
+			if geom.vec2_length(s.pos - other.pos) < MELEE_DIST do anim_apply(anims, body, .Melee)
 		}
 	}
 
@@ -219,7 +220,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	info := &ctx.weapons[weapon.id]
 	pose := soldier_pose(anims, s, s.pos)
 
-	aim_dir := info.style == .Knife ? hands_aim_direction(&pose) : vec2_normalize(s.aim - pose[14])
+	aim_dir := info.style == .Knife ? hands_aim_direction(&pose) : geom.vec2_normalize(s.aim - pose[14])
 	origin := pose[14] - aim_dir * 4 - {0, 2}
 
 	inaccuracy := f32(s.hit_spray) * 0.01 + movement_inaccuracy(ctx, s)
@@ -236,7 +237,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	inaccuracy = min(inaccuracy * 0.25, MAX_INACCURACY)
 	max_dev := MAX_INACCURACY * math.sin(inaccuracy / MAX_INACCURACY * math.PI / 2)
 	dev := Vec2{(rand_f32(&s.rng) * 2 - 1) * max_dev, (rand_f32(&s.rng) * 2 - 1) * max_dev}
-	vel := vec2_normalize(aim_dir + dev) * info.speed + s.vel * info.inherit
+	vel := geom.vec2_normalize(aim_dir + dev) * info.speed + s.vel * info.inherit
 
 	// a muzzle inside a wall (the head in a ceiling) is lowered a bit
 	if _, hit := collision_test(ctx.level, origin); hit do origin.y += 2.5
@@ -249,7 +250,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	case .Eagle:
 		bullet_spawn(ctx, w, origin, spread(s, vel, info.spread), weapon.id, index, info.damage, events)
 		second := spread(s, vel, info.spread)
-		n := vec2_normalize(vel)
+		n := geom.vec2_normalize(vel)
 		origin2 := origin + {-math.sign(vel.x) * abs(n.y) * 3, math.sign(vel.y) * abs(n.x) * 3}
 		bullet_spawn(ctx, w, origin2, second, weapon.id, index, info.damage, events)
 	case .Flamer:
@@ -284,7 +285,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	// self-bink for the next shot; halved when crouched or prone
 	if info.bink < 0 {
 		steady := s.legs.id == .Crouch || s.legs.id == .Crouch_Run || s.legs.id == .Crouch_Run_Back || s.legs.id == .Prone || s.legs.id == .Prone_Move
-		s.hit_spray = calculate_bink(s.hit_spray, steady ? round_half_even(f32(-info.bink) / 2) : int(-info.bink))
+		s.hit_spray = calculate_bink(s.hit_spray, steady ? geom.round_half_even(f32(-info.bink) / 2) : int(-info.bink))
 	}
 
 	s.fired = true
@@ -323,7 +324,7 @@ recoil_animation :: proc(anims: ^Anims, s: ^Soldier) {
 calculate_bink :: proc(accumulated: u16, bink: int) -> u16 {
 	if bink <= 0 do return accumulated
 	acc := f32(accumulated)
-	result := int(accumulated) + bink - round_half_even(acc * (acc / (10 * f32(bink) + acc)))
+	result := int(accumulated) + bink - geom.round_half_even(acc * (acc / (10 * f32(bink) + acc)))
 	return u16(clamp(result, 0, 65535))
 }
 
@@ -366,12 +367,12 @@ throw_grenade :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	if body.frame > 14 && body.frame < 37 && s.grenades > 0 && s.cease_fire_counter < 0 {
 		frag := &ctx.weapons[.Frag]
 		pose := soldier_pose(anims, s, s.pos)
-		dir := vec2_normalize(s.aim - pose[14])
+		dir := geom.vec2_normalize(s.aim - pose[14])
 		// a slight arc that disappears when aiming straight up or down
 		arc := math.sign(dir.x) / 8 * (1 - abs(dir.y))
 		dir.x += math.sin(dir.y * math.PI / 2) * arc
 		dir.y -= math.sin(dir.x * math.PI / 2) * arc
-		dir = vec2_normalize(dir)
+		dir = geom.vec2_normalize(dir)
 
 		strength := f32(body.frame) / frag.speed
 		if body.frame < 24 do strength *= 0.65
@@ -400,12 +401,12 @@ throw_grenade :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 }
 
 hands_aim_direction :: proc(pose: ^Pose) -> Vec2 {
-	return vec2_normalize(pose[14] - pose[15])
+	return geom.vec2_normalize(pose[14] - pose[15])
 }
 
 // Where the soldier is aiming from its position; the fallback is the way it faces.
 aim_direction :: proc(s: ^Soldier) -> Vec2 {
-	d := vec2_normalize(s.aim - s.pos)
+	d := geom.vec2_normalize(s.aim - s.pos)
 	if d == {} do return {f32(s.direction), 0}
 	return d
 }

@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // The bullet pool: spawning, the tick (collisions, then movement, then the timeout
 // and the damage falling off with distance), ending. Ported from OpenSoldat
 // Bullets.pas by way of the old Odin port. What a bullet does to a soldier is a Hit
@@ -117,7 +119,7 @@ bullet_update :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, events: 
 
 	// the damage falls off with distance travelled
 	if b.timeout % 6 == 0 && b.weapon != .Barrett && b.weapon != .M79 && b.weapon != .Knife && b.weapon != .LAW {
-		dist := vec2_length(b.initial - b.pos)
+		dist := geom.vec2_length(b.initial - b.pos)
 		if (b.degrade_count == 0 && dist > 500) || (b.degrade_count == 1 && dist > 900) {
 			b.hit_multiply *= 0.5
 			b.degrade_count += 1

@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // The thing pool and what every thing shares: a small Verlet skeleton (two points
 // for a gun, four for a flag, kit, parachute or stationary gun), its physics against
 // the map, a holder, a timeout. What each kind of thing means lives in its own file:
@@ -277,7 +279,7 @@ thing_physics :: proc(ctx: ^Context, w: ^World, t: ^Thing, events: ^Events) {
 		collided = true
 		// the landing sounds: the first touch of each point, then any hard enough bounce
 		n := t.collide_count[k]
-		moved := vec2_length(p - t.old_pos[k])
+		moved := geom.vec2_length(p - t.old_pos[k])
 		limit: u8 = t.style == .Weapon ? 30 : 3
 		if n == 0 || (moved > 1.5 && n < limit) do emit(events, Thing_Hit{thing = t.style, pos = p, vel = p - t.old_pos[k], part = u8(k)})
 		t.collide_count[k] = min(n + 1, 255)
@@ -300,9 +302,9 @@ thing_physics :: proc(ctx: ^Context, w: ^World, t: ^Thing, events: ^Events) {
 	for c in skel.constraints {
 		a, b := c[0], c[1]
 		if a >= 4 || b >= 4 do continue
-		rest := vec2_length(skel.points[b] - skel.points[a])
+		rest := geom.vec2_length(skel.points[b] - skel.points[a])
 		d := t.pos[b] - t.pos[a]
-		l := vec2_length(d)
+		l := geom.vec2_length(d)
 		if l == 0 do continue
 		diff := (l - rest) / l
 		t.pos[a] += d * 0.5 * diff
@@ -311,7 +313,7 @@ thing_physics :: proc(ctx: ^Context, w: ^World, t: ^Thing, events: ^Events) {
 
 	// settled: stop simulating until something disturbs it
 	if t.style != .Stat_Gun && t.holder == 0 && collided && collided2 {
-		movement := (vec2_length(t.pos[0] - t.old_pos[0]) + vec2_length(t.pos[1] - t.old_pos[1])) / 2
+		movement := (geom.vec2_length(t.pos[0] - t.old_pos[0]) + geom.vec2_length(t.pos[1] - t.old_pos[1])) / 2
 		if movement < MIN_MOVE_DELTA {
 			t.static = true
 			t.old_pos = t.pos
@@ -339,14 +341,14 @@ thing_collide :: proc(ctx: ^Context, t: ^Thing, k: int, at: Vec2, team: Team) ->
 		if team != .None && !team_collides(ty, team) do continue
 		if !point_in_poly_edges(probe, poly) do continue
 		normal, dist, _ := closest_perpendicular(poly, probe)
-		push := vec2_normalize(normal) * dist
+		push := geom.vec2_normalize(normal) * dist
 		p, o := &t.pos[k], &t.old_pos[k]
 		if flag && k == 0 {
 			p^ = o^
 		} else if flag {
-			travel := vec2_length(p^ - o^)
+			travel := geom.vec2_length(p^ - o^)
 			p^ -= push
-			o^ = p^ + vec2_normalize(push) * travel
+			o^ = p^ + geom.vec2_normalize(push) * travel
 			if k == 1 && t.holder == 0 do t.forces[1].y -= 1
 		} else {
 			p^ = o^ - push

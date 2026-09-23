@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // A grenade, rocket or cluster going off: a Hit on every living soldier in the
 // radius (the caller wounds), the things knocked, nearby explosives set off.
 // Ported from explode() in Bullets.pas by way of the old Odin port.
@@ -37,13 +39,13 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 		if i != hit_soldier || hit_part < 0 {
 			best := max(f32)
 			for p in HIT_PARTS {
-				if d := vec2_dot(b.pos - pose[p], b.pos - pose[p]); d < best do best, part = d, p
+				if d := geom.vec2_dot(b.pos - pose[p], b.pos - pose[p]); d < best do best, part = d, p
 			}
 		}
 		a := b.pos - pose[part]
-		dist2 := vec2_dot(a, a)
+		dist2 := geom.vec2_dot(a, a)
 		if dist2 >= radius * radius do continue
-		dist := sqrt_f32(dist2)
+		dist := geom.sqrt_f32(dist2)
 		modifier := hitbox_modifier(info, part)
 		a *= (1 / (dist + 1)) * EXPLOSION_IMPACT_MULTIPLY
 		if kind == .Cluster do modifier *= 0.5
@@ -60,9 +62,9 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 		if t.style != .Alpha_Flag && t.style != .Bravo_Flag && !w.round.kits_collide do continue
 		for k in 0 ..< 4 {
 			a := b.pos - t.pos[k]
-			dist2 := vec2_dot(a, a)
+			dist2 := geom.vec2_dot(a, a)
 			if dist2 >= radius * radius do continue
-			t.old_pos[k] += a * (0.5 * (1 / (sqrt_f32(dist2) + 1)) * EXPLOSION_IMPACT_MULTIPLY)
+			t.old_pos[k] += a * (0.5 * (1 / (geom.sqrt_f32(dist2) + 1)) * EXPLOSION_IMPACT_MULTIPLY)
 			t.static = false
 		}
 	}
@@ -74,7 +76,7 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 		if !other.active do continue
 		if other.style != .Frag_Grenade && other.style != .M79 && other.style != .LAW do continue
 		a := b.pos - other.pos
-		if vec2_dot(a, a) >= AFTER_EXPLOSION_RADIUS * AFTER_EXPLOSION_RADIUS do continue
+		if geom.vec2_dot(a, a) >= AFTER_EXPLOSION_RADIUS * AFTER_EXPLOSION_RADIUS do continue
 		bullet_end(w, &other, u16(i), events)
 		explode(ctx, w, &other, u16(i), other.style == .Frag_Grenade ? .Frag : .M79, -1, -1, events)
 	}

@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // Kits: the medical and grenade kits that come back after a wait, and the bonus
 // kits (flamer, predator, berserker, vest, cluster) that appear on the server's
 // schedule and are gone once taken or timed out. Who may take which, and what each
@@ -78,7 +80,7 @@ kit_eligible :: proc(w: ^World, style: Thing_Style, s: ^Soldier) -> bool {
 
 // May this soldier take it: one it can use, near.
 kit_can_pickup :: proc(w: ^World, t: ^Thing, s: ^Soldier) -> bool {
-	return kit_eligible(w, t.style, s) && vec2_length(thing_center(t) - s.pos) <= KIT_RADIUS
+	return kit_eligible(w, t.style, s) && geom.vec2_length(thing_center(t) - s.pos) <= KIT_RADIUS
 }
 
 // The pickup: what the kit gives, the thing gone, its respawn timer set.

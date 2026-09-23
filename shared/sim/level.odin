@@ -1,6 +1,7 @@
 package sim
 
 import "core:strings"
+import "../geom"
 
 // The map: polygons in sectors, colliders, spawn points, and the props and scenery
 // names the client draws. Loading a .pms and the collision queries on it.
@@ -224,8 +225,8 @@ level_load :: proc(data: []u8, allocator := context.allocator) -> (m: Level, err
 		for k in 0 ..< 3 {
 			n := take_vec2(&r)
 			_ = take_f32(&r) // z
-			if k == 2 do p.bounciness = vec2_length(n) // encoded in the third normal's length
-			p.perp[k] = vec2_normalize(n)
+			if k == 2 do p.bounciness = geom.vec2_length(n) // encoded in the third normal's length
+			p.perp[k] = geom.vec2_normalize(n)
 		}
 		p.type = Poly_Type(take_u8(&r))
 		if p.type == .Background || p.type == .Background_Transition do append(&back, u16(i))
@@ -385,8 +386,8 @@ sector_at :: proc(m: ^Level, sx, sy: int) -> []u16 {
 
 // Sector lookup used by soldier collision: excludes the outermost ring.
 sector_polys :: proc(m: ^Level, pos: Vec2) -> []u16 {
-	sx := round_half_even(pos.x / f32(m.sectors_division))
-	sy := round_half_even(pos.y / f32(m.sectors_division))
+	sx := geom.round_half_even(pos.x / f32(m.sectors_division))
+	sy := geom.round_half_even(pos.y / f32(m.sectors_division))
 	n := int(m.sectors_num)
 	if sx > -n && sx < n && sy > -n && sy < n do return sector_at(m, sx, sy)
 	return nil
@@ -404,7 +405,7 @@ point_in_poly :: proc(p: Vec2, poly: ^Polygon) -> bool {
 
 point_in_poly_edges :: proc(p: Vec2, poly: ^Polygon) -> bool {
 	for k in 0 ..< 3 {
-		if vec2_dot(poly.perp[k], p - poly.verts[k]) < 0 do return false
+		if geom.vec2_dot(poly.perp[k], p - poly.verts[k]) < 0 do return false
 	}
 	return true
 }
@@ -412,9 +413,9 @@ point_in_poly_edges :: proc(p: Vec2, poly: ^Polygon) -> bool {
 // Normal of the edge closest to pos, the distance to it, and the edge index (0..2).
 closest_perpendicular :: proc(poly: ^Polygon, pos: Vec2) -> (perp: Vec2, dist: f32, edge: int) {
 	v := poly.verts
-	d1 := point_line_distance(v[0], v[1], pos)
-	d2 := point_line_distance(v[1], v[2], pos)
-	d3 := point_line_distance(v[2], v[0], pos)
+	d1 := geom.point_line_distance(v[0], v[1], pos)
+	d2 := geom.point_line_distance(v[1], v[2], pos)
+	d3 := geom.point_line_distance(v[2], v[0], pos)
 	edge, dist = 0, d1
 	if d2 < d1 do edge, dist = 1, d2
 	if d3 < d2 && d3 < d1 do edge, dist = 2, d3
@@ -464,14 +465,14 @@ DEFAULT_RAY_FILTER :: Ray_Filter{bullet = true}
 // The distance to the first blocking poly along a-b, if any. Rays longer than
 // max_dist report a hit at a huge distance.
 ray_cast :: proc(m: ^Level, a, b: Vec2, max_dist: f32, filter := DEFAULT_RAY_FILTER) -> (dist: f32, hit: bool) {
-	dist = vec2_length(a - b)
+	dist = geom.vec2_length(a - b)
 	if dist > max_dist do return 9999999, true
 
 	div := f32(m.sectors_division)
-	ax := round_half_even(min(a.x, b.x) / div)
-	ay := round_half_even(min(a.y, b.y) / div)
-	bx := round_half_even(max(a.x, b.x) / div)
-	by := round_half_even(max(a.y, b.y) / div)
+	ax := geom.round_half_even(min(a.x, b.x) / div)
+	ay := geom.round_half_even(min(a.y, b.y) / div)
+	bx := geom.round_half_even(max(a.x, b.x) / div)
+	by := geom.round_half_even(max(a.y, b.y) / div)
 	if ax > MAX_SECTORZ || bx < MIN_SECTORZ || ay > MAX_SECTORZ || by < MIN_SECTORZ do return dist, false
 	ax = max(MIN_SECTORZ, ax)
 	ay = max(MIN_SECTORZ, ay)
@@ -484,7 +485,7 @@ ray_cast :: proc(m: ^Level, a, b: Vec2, max_dist: f32, filter := DEFAULT_RAY_FIL
 				poly := &m.polys[w]
 				if !ray_poly_collides(poly.type, filter) do continue
 				if point_in_poly(a, poly) do return 0, true
-				if p, ok := line_in_poly(a, b, poly); ok do return vec2_length(p - a), true
+				if p, ok := line_in_poly(a, b, poly); ok do return geom.vec2_length(p - a), true
 			}
 		}
 	}
@@ -494,13 +495,13 @@ ray_cast :: proc(m: ^Level, a, b: Vec2, max_dist: f32, filter := DEFAULT_RAY_FIL
 		e := a.y - b.y
 		f := b.x - a.x
 		g := a.x * b.y - a.y * b.x
-		h := sqrt_f32(e * e + f * f)
-		ab2 := vec2_dot(a - b, a - b)
+		h := geom.sqrt_f32(e * e + f * f)
+		ab2 := geom.vec2_dot(a - b, a - b)
 		for c in m.colliders {
 			if !c.active do continue
 			if abs(e * c.pos.x + f * c.pos.y + g) / h <= c.radius {
 				r := ab2 + c.radius * c.radius
-				if vec2_dot(a - c.pos, a - c.pos) <= r && vec2_dot(b - c.pos, b - c.pos) <= r do return dist, false
+				if geom.vec2_dot(a - c.pos, a - c.pos) <= r && geom.vec2_dot(b - c.pos, b - c.pos) <= r do return dist, false
 			}
 		}
 	}
@@ -570,25 +571,4 @@ team_collides :: proc(t: Poly_Type, team: Team) -> bool {
 	case .Non_Flagger_Collides:           return false
 	}
 	return true
-}
-
-// First intersection of segment start-end with a circle (the start if already inside).
-line_circle_collision :: proc(start, end, center: Vec2, radius: f32) -> (point: Vec2, hit: bool) {
-	r2 := radius * radius
-	if vec2_dot(start - center, start - center) <= r2 do return start, true
-	if vec2_dot(end - center, end - center) <= r2 do return end, true
-	d := end - start
-	a := vec2_dot(d, d)
-	if a < 1e-10 do return {}, false
-	f := start - center
-	b := 2 * vec2_dot(f, d)
-	c := vec2_dot(f, f) - r2
-	disc := b * b - 4 * a * c
-	if disc < 0 do return {}, false
-	sq := sqrt_f32(disc)
-	t1 := (-b - sq) / (2 * a)
-	t2 := (-b + sq) / (2 * a)
-	if t1 >= 0 && t1 <= 1 do return start + d * t1, true
-	if t2 >= 0 && t2 <= 1 do return start + d * t2, true
-	return {}, false
 }

@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // A bullet's tick of collisions, in the original's order: the map, the colliders,
 // the soldiers, the things. A bullet stopped by one is rewound so the later checks
 // still see its path, and only a nearer hit wins. Ported from Bullets.pas by way of
@@ -26,21 +28,21 @@ bullet_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, events:
 	if b.style == .Frag_Grenade do map_collide(ctx, w, b, index, b.pos + {0, -2}, events)
 	wall = map_collide(ctx, w, b, index, b.pos, events)
 	if !b.active {
-		nearest = vec2_length(wall - saved_old)
+		nearest = geom.vec2_length(wall - saved_old)
 		b.vel, b.pos, b.old_pos = saved_vel, saved_pos, saved_old
 		b.ricochet_count -= 1
 	}
 
 	collider, hit_collider := collider_collide(ctx, w, b, index, nearest, events)
 	if !b.active {
-		nearest = vec2_length((hit_collider ? collider : wall) - saved_old)
+		nearest = geom.vec2_length((hit_collider ? collider : wall) - saved_old)
 		b.vel, b.pos, b.old_pos = saved_vel, saved_pos, saved_old
 	}
 
 	point, hit := soldier_collide_bullet(ctx, w, b, index, nearest, events)
 	if !b.active {
 		stop := hit ? point : hit_collider ? collider : wall
-		nearest = vec2_length(stop - saved_old)
+		nearest = geom.vec2_length(stop - saved_old)
 	}
 
 	thing_collide_bullet(ctx, w, b, nearest, events)
@@ -67,8 +69,8 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 
 	for i in 0 ..< steps {
 		pos := at + f32(i) * step
-		sx := round_half_even(pos.x / f32(level.sectors_division))
-		sy := round_half_even(pos.y / f32(level.sectors_division))
+		sx := geom.round_half_even(pos.x / f32(level.sectors_division))
+		sy := geom.round_half_even(pos.y / f32(level.sectors_division))
 		if sx < -n || sx > n || sy < -n || sy > n {
 			bullet_end(w, b, index, events)
 			return {}
@@ -96,10 +98,10 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 				b.timeout = min(b.timeout, ARROW_RESIST)
 				if b.timeout < 20 do b.forces.y += w.gravity * BULLET_GRAVITY
 			case .Frag_Grenade, .Flame:
-				if b.style == .Frag_Grenade && vec2_length(b.vel) > 1.5 do emit(events, Grenade_Bounce{id = index, owner = b.owner, pos = pos})
+				if b.style == .Frag_Grenade && geom.vec2_length(b.vel) > 1.5 do emit(events, Grenade_Bounce{id = index, owner = b.owner, pos = pos})
 				normal, dist, _ := closest_perpendicular(poly, b.pos)
 				b.pos = pos
-				b.vel = (b.vel - vec2_normalize(normal) * dist) * GRENADE_SURFACECOEF
+				b.vel = (b.vel - geom.vec2_normalize(normal) * dist) * GRENADE_SURFACECOEF
 				if b.style == .Flame do b.timeout = min(b.timeout, 16)
 			case .Cluster_Nade:
 				cluster_split(ctx, w, b, events)
@@ -126,20 +128,20 @@ ricochet :: proc(level: ^Level, w: ^World, b: ^Bullet, index: u16, poly: ^Polygo
 	b.old_pos = b.pos
 	b.pos = pos - b.vel
 	// one ricochet per surface contact
-	if vec2_length(b.pos - b.hit_spot) <= 50 {
+	if geom.vec2_length(b.pos - b.hit_spot) <= 50 {
 		bullet_end(w, b, index, events, pos)
 		return false
 	}
 	b.ricochet_count += 1
 	normal, _, _ := closest_perpendicular(poly, b.pos)
-	speed := vec2_length(b.vel)
-	reflect := vec2_normalize(normal) * -speed
+	speed := geom.vec2_length(b.vel)
+	reflect := geom.vec2_normalize(normal) * -speed
 	b.vel = b.vel * (25.0 / 35) + reflect * (10.0 / 35)
 	b.pos = pos
 	b.hit_spot = pos
 	b.old_pos = pos
 	// dead if the deflected path is still inside geometry
-	probe := pos + vec2_normalize(b.vel) * (speed / 6)
+	probe := pos + geom.vec2_normalize(b.vel) * (speed / 6)
 	for idx in sector_polys(level, probe) {
 		p := &level.polys[idx]
 		if bullet_poly_collides(p.type, team) && point_in_poly_edges(probe, p) {
@@ -169,9 +171,9 @@ cluster_split :: proc(ctx: ^Context, w: ^World, b: ^Bullet, events: ^Events) {
 collider_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, nearest: f32, events: ^Events) -> (point: Vec2, hit: bool) {
 	for c in ctx.level.colliders {
 		if !c.active do continue
-		p, ok := line_circle_collision(b.pos, b.pos + b.vel, c.pos, c.radius / 1.7)
+		p, ok := geom.line_circle_collision(b.pos, b.pos + b.vel, c.pos, c.radius / 1.7)
 		if !ok do continue
-		if nearest > -1 && vec2_length(p - b.old_pos) > nearest do return {}, false // something nearer stopped it
+		if nearest > -1 && geom.vec2_length(p - b.old_pos) > nearest do return {}, false // something nearer stopped it
 		#partial switch b.style {
 		case .Plain, .Shotgun, .Punch, .Knife, .Thrown_Knife, .M2:
 			b.pos = p - b.vel
@@ -240,7 +242,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 		if !s.active || i == int(b.hit_body) do continue
 		if w.soldiers[i].dead && !w.ragdolls[i].active do continue
 		if i == int(b.owner) && b.timeout >= owner_vulnerable_after do continue
-		d := vec2_dot(b.pos - s.pos, b.pos - s.pos)
+		d := geom.vec2_dot(b.pos - s.pos, b.pos - s.pos)
 		j := count
 		for j > 0 && d < dists[j - 1] {
 			dists[j], order[j] = dists[j - 1], order[j - 1]
@@ -276,12 +278,12 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 		for p in HIT_PARTS {
 			center := pose[p]
 			if !melee do center.x -= 2
-			if q, ok := line_circle_collision(start, end, center, radius); ok {
-				if d := vec2_dot(q - start, q - start); d < best do best, part, point = d, p, q
+			if q, ok := geom.line_circle_collision(start, end, center, radius); ok {
+				if d := geom.vec2_dot(q - start, q - start); d < best do best, part, point = d, p, q
 			}
 		}
 		if part < 0 do continue
-		if nearest > -1 && vec2_length(point - b.old_pos) > nearest do return // a wall hit closer than this soldier wins
+		if nearest > -1 && geom.vec2_length(point - b.old_pos) > nearest do return // a wall hit closer than this soldier wins
 		hit_point, hit = point, true
 		if target.cease_fire_counter >= 0 do continue
 
@@ -296,7 +298,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 		case .Plain, .Shotgun, .Punch, .Knife, .M2:
 			b.pos = point
 			emit(events, Blood{shooter = b.owner, target = u8(ti), pos = point, vel = b.vel})
-			speed := vec2_length(b.vel)
+			speed := geom.vec2_length(b.vel)
 			wound(events, b, ti, speed * b.hit_multiply * modifier, part, point, push)
 			b.hit_body = i8(ti)
 			// a punched enemy starts throwing its gun away
@@ -326,14 +328,14 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			b.pos = point - b.vel
 			b.forces.y -= w.gravity * BULLET_GRAVITY
 			emit(events, Blood{shooter = b.owner, target = u8(ti), pos = point, vel = b.vel})
-			wound(events, b, ti, vec2_length(b.vel) * b.hit_multiply * modifier, part, point, push)
+			wound(events, b, ti, geom.vec2_length(b.vel) * b.hit_multiply * modifier, part, point, push)
 			bullet_end(w, b, index, events, point)
 		case .M79, .Flame_Arrow, .LAW:
 			if corpse do continue // rockets fly through corpses
 			explode(ctx, w, b, index, .M79, ti, part, events)
 			b.pos = point
 			bullet_end(w, b, index, events)
-			wound(events, b, ti, vec2_length(b.vel) * b.hit_multiply, part, point, push)
+			wound(events, b, ti, geom.vec2_length(b.vel) * b.hit_multiply, part, point, push)
 		case .Flame:
 			if ti == int(b.owner) do return point, true
 			b.pos = pose[part]
@@ -350,7 +352,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 			explode(ctx, w, b, index, .Cluster, ti, part, events)
 			bullet_end(w, b, index, events)
 		case .Thrown_Knife:
-			wound(events, b, ti, vec2_length(b.vel) * b.hit_multiply * 0.01, part, point, push)
+			wound(events, b, ti, geom.vec2_length(b.vel) * b.hit_multiply * 0.01, part, point, push)
 			if corpse do continue // a thrown knife goes through a corpse rather than sticking in it
 			bullet_end(w, b, index, events)
 		}
@@ -383,13 +385,13 @@ thing_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, nearest: f32,
 		part := -1
 		point: Vec2
 		for k in 0 ..< 2 {
-			if p, ok := line_circle_collision(b.pos, b.pos + b.vel, t.pos[k], FLAG_PART_RADIUS); ok {
+			if p, ok := geom.line_circle_collision(b.pos, b.pos + b.vel, t.pos[k], FLAG_PART_RADIUS); ok {
 				part, point = k, p
 				break
 			}
 		}
 		if part < 0 do continue
-		if nearest > -1 && vec2_length(point - b.old_pos) > nearest do return
+		if nearest > -1 && geom.vec2_length(point - b.old_pos) > nearest do return
 
 		// the original stops looking while this bullet is cooling down on this thing
 		slot := 0

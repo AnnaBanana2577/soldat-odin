@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // SimpleDecision (AI.pas): how a bot moves and shoots at what it can see. Where it
 // stands on the map is bot_path.odin's business; this is the fight alone, decided by
 // how far off the target is on each axis, and it ends by pointing the cursor.
@@ -128,18 +130,18 @@ bot_fight :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 	lead: f32 = dist_x < DIST_FAR ? 0.5 : 1.75
 	acc := f32(b.accuracy)
 	ctl.aim = {
-		f32(round_half_even(at.x)),
-		f32(round_half_even(at.y - (lead * f32(dist_x) / info.speed) - acc + f32(rand_int(&b.rng, b.accuracy)))),
+		f32(geom.round_half_even(at.x)),
+		f32(geom.round_half_even(at.y - (lead * f32(dist_x) / info.speed) - acc + f32(rand_int(&b.rng, b.accuracy)))),
 	}
 
 	// Impossible: against a sniper it works out where the target will be when the shot
 	// arrives, and fires on the frames its pose allows.
 	if b.difficulty < 60 && (o.weapon.id == .Barrett || o.weapon.id == .Ruger) {
-		dist := f32(round_half_even(vec2_length(m - t)))
-		ahead := Vec2{f32(round_half_even(t.x)), f32(round_half_even(t.y))}
-		for _ in 0 ..< round_half_even(dist / ctx.weapons[o.weapon.id].speed) {
-			ahead.x += f32(round_half_even(o.vel.x))
-			ahead.y += f32(round_half_even(o.vel.y))
+		dist := f32(geom.round_half_even(geom.vec2_length(m - t)))
+		ahead := Vec2{f32(geom.round_half_even(t.x)), f32(geom.round_half_even(t.y))}
+		for _ in 0 ..< geom.round_half_even(dist / ctx.weapons[o.weapon.id].speed) {
+			ahead.x += f32(geom.round_half_even(o.vel.x))
+			ahead.y += f32(geom.round_half_even(o.vel.y))
 		}
 		ctl.aim = ahead
 		if s.weapon.fire_count < 3 {

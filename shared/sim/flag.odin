@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // The flags: hanging from a carrier's hand, dropped, thrown, returned, captured,
 // timing out back to base. Ported from the flag parts of things.lua and rules.lua.
 
@@ -35,7 +37,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 		t.interest = FLAG_INTEREST_TIME // a flag on the move is worth chasing again
 	}
 	home := flag_home(w, t.style)
-	t.in_base = vec2_length(t.pos[0] - home) < BASE_RADIUS
+	t.in_base = geom.vec2_length(t.pos[0] - home) < BASE_RADIUS
 	if t.in_base && t.holder == 0 do t.timeout = FLAG_TIMEOUT
 	if !w.authority do return // the timeout, the captures and the returns are decided elsewhere
 	if t.holder == 0 && !t.in_base {
@@ -56,7 +58,7 @@ flag_update :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Eve
 // May this soldier grab it: the other team's flag, not under cease fire, near.
 flag_can_grab :: proc(t: ^Thing, s: ^Soldier) -> bool {
 	if s.team == flag_team(t.style) || s.cease_fire_counter > 0 do return false
-	return vec2_length(thing_center(t) - s.pos) <= FLAG_RADIUS
+	return geom.vec2_length(thing_center(t) - s.pos) <= FLAG_RADIUS
 }
 
 // The grab: the flag hangs from the soldier's hand from now on.
@@ -71,7 +73,7 @@ flag_grab :: proc(t: ^Thing, index: u8, soldier: u8, events: ^Events) {
 flag_return_touch :: proc(ctx: ^Context, w: ^World, t: ^Thing, events: ^Events) {
 	for &s, i in w.soldiers {
 		if !s.active || s.dead || s.team != flag_team(t.style) do continue
-		if vec2_length(thing_center(t) - s.pos) > FLAG_RADIUS do continue
+		if geom.vec2_length(thing_center(t) - s.pos) > FLAG_RADIUS do continue
 		pos := t.pos[0]
 		flag_respawn(ctx, w, t)
 		emit(events, Flag_Return{player = u8(i), flag = t.style, pos = pos})
@@ -85,7 +87,7 @@ flag_capture :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Ev
 	if holder.team == flag_team(t.style) do return
 	for &other, i in w.things {
 		if u8(i) == index || !is_flag(other.style) || other.holder != 0 || !other.in_base do continue
-		if vec2_length(t.pos[0] - other.pos[0]) < TOUCHDOWN_RADIUS {
+		if geom.vec2_length(t.pos[0] - other.pos[0]) < TOUCHDOWN_RADIUS {
 			holder.flags += 1
 			w.round.scores[holder.team] += 1
 			emit(events, Flag_Score{player = t.holder - 1, flag = t.style, pos = t.pos[0]})
@@ -101,7 +103,7 @@ flag_capture :: proc(ctx: ^Context, w: ^World, t: ^Thing, index: u8, events: ^Ev
 flag_throw :: proc(ctx: ^Context, w: ^World, t: ^Thing, holder: ^Soldier) {
 	if holder.body.id == .Roll || holder.body.id == .Roll_Back do return
 	pose := soldier_pose(ctx.anims, holder, holder.pos)
-	d := vec2_normalize(holder.aim - pose[14]) * FLAG_THROW_POWER
+	d := geom.vec2_normalize(holder.aim - pose[14]) * FLAG_THROW_POWER
 	o := d * 5
 	b := d + holder.vel
 	n := o + b

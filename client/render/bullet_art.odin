@@ -6,6 +6,7 @@ import "core:math"
 import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
+import "../../shared/geom"
 import "../../shared/sim"
 
 // The projectiles as drawn, from TBullet.Render in Bullets.pas. Most styles are the
@@ -94,7 +95,7 @@ bullet_draw :: proc(b: ^Bullet_Art, bullet: ^sim.Bullet, alpha: f32, seconds: f6
 	pos := bullet.old_pos + (bullet.pos - bullet.old_pos) * alpha
 	timeout := f32(bullet.timeout) + 1 - alpha // TimeOutReal
 	vel := bullet.vel
-	speed := sim.vec2_length(vel)
+	speed := geom.vec2_length(vel)
 	heading := math.atan2(vel.y, vel.x)
 	spin := timeout * -6 * math.PI / 180 // the timeout counts down, so it stands in for age
 	sinus := f32(math.sin(f64(timeout) + 5.1 * seconds)) // the M2's wobbling smudge

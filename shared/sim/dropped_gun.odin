@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // Guns on the ground: thrown from a hand, dropped by a death, a thrown knife landing.
 // A two-point thing (karabin.po at the gun's length) carrying the weapon and its
 // ammo; it resists pickup for half a second, settles without bouncing and goes
@@ -30,7 +32,7 @@ dropped_gun_create :: proc(ctx: ^Context, w: ^World, weapon: Weapon_Id, owner: u
 	t.flip = s.direction < 0
 	t.ammo = ammo
 	pose := soldier_pose(ctx.anims, s, s.pos)
-	aim := vec2_normalize(s.aim - pose[14])
+	aim := geom.vec2_normalize(s.aim - pose[14])
 	// a thrown gun carries the thrower's speed; one let go of by a death does not, so it
 	// drops where the soldier fell (the original gives it the body's velocity too, which
 	// sends a jetting soldier's gun sailing away)
@@ -67,7 +69,7 @@ dropped_gun_can_pickup :: proc(t: ^Thing, s: ^Soldier) -> bool {
 	secondary := t.weapon == .Knife || t.weapon == .Chainsaw || t.weapon == .LAW
 	if secondary && s.body.id == .Change do return false
 	radius := t.weapon == .Knife ? f32(GUN_RADIUS) * 1.5 : f32(GUN_RADIUS)
-	return vec2_length(thing_center(t) - s.pos) <= radius
+	return geom.vec2_length(thing_center(t) - s.pos) <= radius
 }
 
 // The pickup: the gun and its ammo into the hand, the thing gone.

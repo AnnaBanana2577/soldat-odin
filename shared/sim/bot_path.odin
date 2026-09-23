@@ -1,5 +1,7 @@
 package sim
 
+import "../geom"
+
 // ControlBot (AI.pas): one tick of a bot. It looks for someone to shoot at, and
 // failing that walks the waypoints the map author laid; then it looks for a flag or a
 // kit worth fetching, steps out from under a grenade, and gets itself unstuck.
@@ -92,7 +94,7 @@ bot_walk :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 	if b.difficulty < 201 {
 		for &bullet in w.bullets {
 			if !bullet.active || bullet.style != .Frag_Grenade do continue
-			if vec2_length(bullet.pos - s.pos) >= FRAG_EXPLOSION_RADIUS * 1.4 do continue
+			if geom.vec2_length(bullet.pos - s.pos) >= FRAG_EXPLOSION_RADIUS * 1.4 do continue
 			ctl.left = bullet.pos.x > s.pos.x
 			ctl.right = !ctl.left
 		}
@@ -152,7 +154,7 @@ bot_follow_path :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8, held: ^Thin
 		if n := int(cur.connections[rand_int(&b.rng, cur.count)]); n > 0 {
 			b.next = n
 			at := level.waypoints[n].pos
-			ctl.aim = {f32(round_half_even(at.x)), f32(round_half_even(at.y))}
+			ctl.aim = {f32(geom.round_half_even(at.x)), f32(geom.round_half_even(at.y))}
 		}
 	}
 	next := bot_waypoint(level, b.next)
@@ -178,8 +180,8 @@ bot_follow_path :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8, held: ^Thin
 		speed := ctx.weapons[s.weapon.id].speed
 		drop := 1.75 * 100 / speed
 		ctl.aim = {
-			f32(round_half_even(at.x)),
-			f32(round_half_even(at.y - drop - f32(b.accuracy) + f32(rand_int(&b.rng, b.accuracy)))),
+			f32(geom.round_half_even(at.x)),
+			f32(geom.round_half_even(at.y - drop - f32(b.accuracy) + f32(rand_int(&b.rng, b.accuracy)))),
 		}
 		ctl.fire = true
 	}
@@ -190,7 +192,7 @@ bot_follow_path :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8, held: ^Thin
 
 	// standing still while trying to walk: stuck on something, so jump
 	if cur.action == 0 {
-		if (ctl.left || ctl.right) && !ctl.down && vec2_length(s.vel) < 3 do b.one_place += 1
+		if (ctl.left || ctl.right) && !ctl.down && geom.vec2_length(s.vel) < 3 do b.one_place += 1
 		else do b.one_place = 0
 	} else {
 		b.one_place += 1
@@ -292,7 +294,7 @@ bot_flag_at_home :: proc(w: ^World, team: Team) -> bool {
 bot_closest_waypoint :: proc(m: ^Level, pos: Vec2, radius: f32, current: int) -> int {
 	for p, i in m.waypoints {
 		if i == current || !p.active do continue
-		if vec2_length(pos - p.pos) < radius do return i
+		if geom.vec2_length(pos - p.pos) < radius do return i
 	}
 	return 0
 }

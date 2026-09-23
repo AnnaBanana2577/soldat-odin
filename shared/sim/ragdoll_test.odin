@@ -2,6 +2,7 @@ package sim
 
 import "core:fmt"
 import "core:testing"
+import "../geom"
 
 // The corpses: a body falls, lands and stays on top of the map, and bullets meet it
 // where it lies — blood, a body slowing the shot down, and a corpse shot enough coming
@@ -117,7 +118,7 @@ test_corpse_lands_on_the_map :: proc(t: ^testing.T) {
 	// It slumps from standing and comes to rest on top of the ground, not in it.
 	for _ in 0 ..< 240 do tick(f)
 	testing.expect(t, r.pos[RAGDOLL_HEAD].y > head.y, "the body never dropped")
-	testing.expect(t, vec2_length(r.pos[RAGDOLL_HEAD] - r.old_pos[RAGDOLL_HEAD]) < 0.5, "the body never came to rest")
+	testing.expect(t, geom.vec2_length(r.pos[RAGDOLL_HEAD] - r.old_pos[RAGDOLL_HEAD]) < 0.5, "the body never came to rest")
 	testing.expectf(t, buried(f, 0) < 5, "the body sank %.1f px into the map", buried(f, 0))
 	testing.expect_value(t, f.world.soldiers[0].pos, r.pos[RAGDOLL_HEAD])
 }
@@ -139,7 +140,7 @@ test_a_corpse_starts_from_the_state_alone :: proc(t: ^testing.T) {
 	s.pos, s.old_pos, s.vel, s.forces = {}, {}, {}, {}
 	tick(f)
 	head := f.world.ragdolls[0].pos[RAGDOLL_HEAD]
-	testing.expectf(t, vec2_length(head - died_at) < 30, "the corpse started at %v, not where it died (%v)", head, died_at)
+	testing.expectf(t, geom.vec2_length(head - died_at) < 30, "the corpse started at %v, not where it died (%v)", head, died_at)
 }
 
 // A body landing is heard, and the count quiets it as it settles, so a corpse rolling
@@ -210,7 +211,7 @@ test_bullets_meet_a_corpse :: proc(t: ^testing.T) {
 	testing.expect(t, !saw(f, Damage), "a corpse hit was counted as damage dealt")
 	// Through a corpse, barely slowed, rather than stopped by it.
 	testing.expect(t, b.active, "the bullet stopped in the corpse")
-	testing.expect(t, vec2_length(b.vel) < speed, "the corpse didn't slow the bullet")
+	testing.expect(t, geom.vec2_length(b.vel) < speed, "the corpse didn't slow the bullet")
 }
 
 @(test)
