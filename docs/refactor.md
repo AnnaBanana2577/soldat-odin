@@ -1,628 +1,286 @@
-Making a 2D multiplayer game in Odin. Is it good to just have a file for each entity with a step function, that gets passed a pointer to the word (which has all the entities) so it can access them and adjust their health, check collision, etc)? Or is that a messy way of doing things
+# Refactor: the code as a tree of structs
 
-Yes — that is a perfectly reasonable architecture for a small/medium 2D multiplayer game in Odin, and honestly it can be much cleaner than introducing an elaborate ECS or component framework.
+The whole program is one struct, and every part of it is a struct inside that one. A
+file is a struct and the procedures that act on it. A directory is a struct big enough
+to be called by name from outside. The directory tree is the struct tree: what the
+client owns is under client/, what the game owns is under game/, what the world owns is
+under game/world/. Nothing is global but the root of each executable.
 
-I’d make one important distinction, though:
+The shape, in the sim's terms:
 
-Let entities have step() functions, but be careful about letting every entity freely mutate every other entity.
-
-A structure like this is quite nice:
-
-World :: struct {
-    players: []Player,
-    bullets: []Bullet,
-    grenades: []Grenade,
-    pickups: []Pickup,
-    walls: []Wall,
-    ...
+```
+Game {                              game.tick
+  World {                           world.step
+    map, soldiers[], bullets[], things[] (flags, kits, dropped guns), ragdolls[], events
+    each entity stepped on a View of the world, never the World itself
+  }
+  Match {                           match.run
+    settings, time_remaining, score, mode
+  }
 }
-
-Player :: struct {
-    pos:     Vec2,
-    vel:     Vec2,
-    health:  i32,
-    ...
-}
-
-player_step :: proc(p: ^Player, world: ^World, dt: f32) {
-    // read input
-    // movement
-    // collision
-    // maybe interact with other entities
-}
-
-Then your main simulation is basically:
-
-world_step :: proc(w: ^World, dt: f32) {
-    for &player in w.players {
-        player_step(&player, w, dt)
-    }
-
-    for &bullet in w.bullets {
-        bullet_step(&bullet, w, dt)
-    }
-
-    for &grenade in w.grenades {
-        grenade_step(&grenade, w, dt)
-    }
-}
-
-That's simple, explicit, and very Odin-like.
-
-Where I'd draw the line
-
-I wouldn't have something like:
-
-player_step :: proc(p: ^Player, world: ^World, dt: f32) {
-    // ...
-    world.players[3].health -= 50
-    world.bullets[8].destroyed = true
-    world.pickups[2].active = false
-    world.some_random_system.foo = ...
-}
-
-everywhere.
-
-It works, but eventually your entity code becomes coupled to the entire game.
-
-Instead, I'd use the World pointer primarily as the simulation context:
-
-player_step :: proc(p: ^Player, world: ^World, dt: f32) {
-    // Query world
-    hits := world_query_collision(world, p.pos, ...)
-
-    // Produce effects
-    if hit_enemy {
-        damage(world, enemy_id, 25)
-    }
-}
-
-So you can have a small collection of world-level operations:
-
-damage(world, entity_id, amount)
-destroy_entity(world, entity_id)
-spawn_bullet(world, ...)
-spawn_explosion(world, ...)
-pickup_item(world, player_id, item_id)
-
-That gives you a nice middle ground.
-
-An architecture I think would fit your game particularly well
-
-Given the kind of fixed-timestep server simulation you've been describing, I'd probably organize it something like:
-
-game/
-    world.odin
-
-    player.odin
-    bullet.odin
-    grenade.odin
-    pickup.odin
-    flag.odin
-
-    collision.odin
-    damage.odin
-    weapons.odin
-    physics.odin
-
-    input.odin
-
-And conceptually:
-
-                 World
-                   │
-       ┌───────────┼───────────┐
-       ↓           ↓           ↓
-    Players      Bullets     Pickups
-       │           │           │
-    step()       step()       step()
-       │           │           │
-       └───────────┼───────────┘
-                   ↓
-             World queries
-             World mutations
-
-The World owns the state.
-
-Entities contain their own behavior.
-
-Systems/helpers handle things that don't naturally belong to one entity.
-
-That's a very comfortable architecture for a game that isn't enormous.
-
-And you don't necessarily need an ECS
-
-For example, I'd be totally happy with:
-
-World :: struct {
-    players:  []Player,
-    bullets:  []Bullet,
-    grenades: []Grenade,
-    flags:    []Flag,
-    pickups:  []Pickup,
-}
-
-rather than:
-
-Entity
- ├── Transform component
- ├── Physics component
- ├── Health component
- ├── Weapon component
- └── ...
-
-For a game like yours, the former can be much easier to reason about.
-
-You also get a major benefit for multiplayer:
-
-simulate_server(world, inputs)
-simulate_client(world, inputs)
-
-can operate on essentially the same World and entity simulation code.
-
-Your renderer doesn't need to know anything about simulation internals:
-
-render(world)
-
-And networking can serialize the relevant pieces of World:
-
-write_snapshot(world, writer)
-read_snapshot(&world, reader)
-
-That's a really clean separation.
-
-One thing I'd strongly recommend
-
-Give entities stable IDs, rather than having entity code identify things by array index:
-
-Entity_ID :: distinct u32
-
-Player :: struct {
-    id: Entity_ID,
-    pos: Vec2,
-    ...
-}
-
-Then:
-
-damage(world, target_id, 25)
-
-is much safer than:
-
-world.players[3].health -= 25
-
-especially once things can be spawned/destroyed.
-
-So: yes, your basic idea is good. I'd call it a World + entity behavior architecture rather than a messy design. The trick is keeping the World pointer from becoming a giant bag of arbitrary mutations; give it a small, deliberate API for querying and changing simulation state.
-
-Yep. That's exactly how I'd do it. I overcomplicated world_step in the previous example by introducing players_step, bullets_step, etc.
-
-The simple version is:
-
-world_step :: proc(w: ^World, inputs: []Input, dt: f32) {
-    for &player in w.players {
-        player_step(&player, w, inputs[player.id], dt)
-    }
-
-    for &bullet in w.bullets {
-        bullet_step(&bullet, w, dt)
-    }
-
-    for &grenade in w.grenades {
-        grenade_step(&grenade, w, dt)
-    }
-
-    for &pickup in w.pickups {
-        pickup_step(&pickup, w, dt)
-    }
-
-    for &flag in w.flags {
-        flag_step(&flag, w, dt)
-    }
-
-    // cleanup dead/destroyed entities
-}
-
-So conceptually:
-
-tick
-  ↓
-match_step
-  ↓
-world_step
-  ├── player_step
-  ├── bullet_step
-  ├── grenade_step
-  ├── pickup_step
-  └── flag_step
-
-And each entity gets:
-
-entity_step(entity, world, ...)
-
-The World is the simulation container and orchestrator, while each entity owns its behavior.
-
-That's actually a really nice sweet spot:
-
-Game = World + Match
-Match = lifecycle/rules
-World = entities + simulation
-Entity step() = entity behavior
-Server = networking/server loop
-Client = networking/input/rendering/client loop
-
-No need for "systems" unless you eventually discover a reason for them.
-
-One thing you will eventually need to decide is step ordering. For example, whether bullets see players after players have moved, whether pickups happen before/after movement, etc. But that's just a natural part of world_step, and you can make the ordering explicit.
-
-Today 8:42 AM
-If my game had a hud, and client also had map editor, and other tools, what’s best way to structure?
-
-Game struct has a HUD struct? Client has a var for current mode: editor, game, other tools?
-
-Yeah — I'd keep the HUD and editor/tooling out of Game. Your instinct about a Client mode is right.
-
-I'd make the separation:
-
-Server
-├── config
-├── network
-└── game
-    ├── world
-    └── match
-
-Client
-├── network
-├── game
-├── input
-├── renderer
-├── hud
-├── editor
-└── mode
-
-Where Game remains pure game simulation:
-
-Game :: struct {
-    world: World,
-    match: Match,
-}
-
-And the client is the application that uses the game.
-
-Client mode
-
-Something like:
-
-Client_Mode :: enum {
-    Game,
-    Editor,
-    Console,
-    Settings,
-    Main_Menu,
-}
-
-Then:
-
-Client :: struct {
-    game: Game,
-
-    network: Network,
-    input: Input,
-    renderer: Renderer,
-
-    hud: HUD,
-    editor: Editor,
-
-    mode: Client_Mode,
-}
-
-And your client loop can dispatch based on mode:
-
-client_step :: proc(c: ^Client, dt: f32) {
-    input_step(&c.input)
-
-    switch c.mode {
-    case Game:
-        game_client_step(c, dt)
-
-    case Editor:
-        editor_step(&c.editor, &c.input, dt)
-
-    case Console:
-        console_step(...)
-
-    case Settings:
-        settings_step(...)
-    }
-}
-One refinement: HUD is usually tied to Game mode
-
-I'd probably still have:
-
-Client :: struct {
-    game: Game,
-    hud: HUD,
-    editor: Editor,
-    ...
-}
-
-rather than putting:
-
-Game :: struct {
-    world: World,
-    match: Match,
-    hud: HUD, // ❌
-}
-
-because the server should be able to run Game with zero knowledge that a HUD exists.
-
-The HUD can simply read the game:
-
-hud_draw :: proc(hud: ^HUD, game: ^Game) {
-    draw_health(game.world, ...)
-    draw_score(game.match, ...)
-    draw_timer(game.match, ...)
-}
-
-That's a very clean relationship:
-
-Game
-  ↑
-  │ reads
-  │
-HUD
-
-rather than:
-
-Game
- └── HUD
-The editor is slightly different
-
-Your editor probably shouldn't even depend on a running Game unless you're specifically editing a live game.
-
-You might have:
-
-Editor :: struct {
-    map: Map,
-    selected: Entity_ID,
-    tool: Editor_Tool,
-    camera: Camera,
-}
-
-Then:
-
-Client
-│
-├── Game       ← actual simulation
-│
-├── HUD        ← presentation of Game
-│
-├── Editor     ← map/content authoring
-│
-└── Mode       ← which application state is active
-
-And eventually you could have:
-
-Client_Mode :: enum {
-    Menu,
-    Game,
-    Editor,
-}
-
-with the mode determining which client subsystem gets input/update/render time.
-
-The important architectural principle is:
-
-Game is the game. Client is the application that displays and manipulates the game.
-
-That distinction gives you a lot of freedom.
-
-Your dedicated server can literally be:
-
-Server → Game → World + Match
-
-while your desktop client is:
-
-Client
-├── Game
-├── HUD
-├── Renderer
-├── Editor
-├── Audio
-└── Input
-
-And later you could make a headless test runner:
-
-Test
-└── Game
-
-No renderer, no networking, no HUD, no editor.
-
-That's a very clean architecture for Odin because you're not creating abstractions just for the sake of abstraction. Each struct has a pretty obvious reason to exist.
-
-But hud only runs when game runs, so I felt for client hud should be in game. Client and server can define their own game struct, they just share world and match?
-
-Yes — I think your model is actually cleaner given what you're building.
-
-The key distinction is that Game doesn't necessarily have to mean "simulation only." It can mean "the game experience/application state," while World + Match are the shared simulation core.
-
-I'd structure it like this:
-
-World :: struct {
-    players: []Player,
-    bullets: []Bullet,
-    flags: []Flag,
-    // ...
-}
-
-Match :: struct {
-    mode: Match_Mode,
-    state: Match_State,
-    score: [2]i32,
-    // rules/lifecycle
-}
-
-Then the server and client can compose those differently:
-
-Server_Game :: struct {
-    world: World,
-    match: Match,
-}
-Client_Game :: struct {
-    world: World,
-    match: Match,
-
-    hud: HUD,
-    camera: Camera,
-    // client-only game presentation/state
-}
-
-And:
-
-Server :: struct {
-    config: Server_Config,
-    network: Network,
-    game: Server_Game,
-}
-Client :: struct {
-    network: Network,
-    input: Input,
-    renderer: Renderer,
-    audio: Audio,
-
-    mode: Client_Mode,
-    game: Client_Game,
-    editor: Editor,
-    // other tools
-}
-This gives you a really nice layering
-                  ┌───────────────┐
-                  │     World     │
-                  └───────┬───────┘
-                          │
-                  ┌───────▼───────┐
-                  │     Match     │
-                  └───────┬───────┘
-                          │
-                 shared simulation
-                    Game pieces
-                          │
-             ┌────────────┴────────────┐
-             │                         │
-      ┌──────▼──────┐          ┌───────▼──────┐
-      │ Server_Game │          │ Client_Game  │
-      │             │          │              │
-      │ World       │          │ World        │
-      │ Match       │          │ Match        │
-      │             │          │ HUD          │
-      │             │          │ Camera       │
-      └──────┬──────┘          └───────┬──────┘
-             │                         │
-          Server                    Client
-
-And importantly, World and Match aren't duplicated conceptually. They're the shared game state/model. The outer Server_Game and Client_Game are just different compositions around that core.
-
-I'd probably even call the shared thing Game_State
-
-For example:
-
-Game_State :: struct {
-    world: World,
-    match: Match,
-}
-
-Then:
-
-Server_Game :: struct {
-    state: Game_State,
-}
-Client_Game :: struct {
-    state: Game_State,
-
-    hud: HUD,
-    camera: Camera,
-}
-
-But honestly, that's only worth doing if Game_State gives you a useful name. You don't need another abstraction just because you can make one.
-
-Your intuition about the HUD is particularly good: if HUD is specifically the HUD for the running game, having it owned by Client_Game makes semantic sense.
-
-Then your client mode becomes very clean:
-
-Client_Mode :: enum {
-    Game,
-    Editor,
-    Console,
-    Menu,
-}
-Client :: struct {
-    mode: Client_Mode,
-
-    game: Client_Game,
-    editor: Editor,
-
-    network: Network,
-    input: Input,
-    renderer: Renderer,
-    audio: Audio,
-}
-
-So:
-
-client_update :: proc(c: ^Client, dt: f32) {
-    switch c.mode {
-    case .Game:
-        client_game_update(&c.game, &c.input, dt)
-
-    case .Editor:
-        editor_update(&c.editor, &c.input, dt)
-
-    case .Console:
-        console_update(...)
-
-    case .Menu:
-        menu_update(...)
-    }
-}
-
-And:
-
-client_draw :: proc(c: ^Client) {
-    switch c.mode {
-    case .Game:
-        client_game_draw(&c.game, &c.renderer)
-
-    case .Editor:
-        editor_draw(&c.editor, &c.renderer)
-
-    case .Console:
-        console_draw(...)
-
-    case .Menu:
-        menu_draw(...)
-    }
-}
-
-That feels very Odin-like to me: explicit structs, straightforward ownership, no scene hierarchy, no interfaces, no ECS required.
-
-The really nice part is that your simulation functions can remain shared:
-
-tick
-match_step
-world_step
-player_step
-bullet_step
-flag_step
-
-while the client-specific stuff sits above them:
-
-Client
-└── Client_Game
-    ├── Game state
-    │   ├── World
-    │   └── Match
-    │
-    ├── HUD
-    └── Camera
-
-So I'd revise my earlier recommendation: yes, putting HUD in Client_Game is probably better for your architecture than putting it directly on Client. The Client is the application; Client_Game is the running game experience.
+```
+
+The client is mostly arranged this way already (App owns the connection, the game, the
+render, the HUD, the audio, each a package with init, tick, draw and destroy). This plan
+finishes the job: the sim, whose forty files stand in one package with the round and
+the rules mixed into the world; the server, whose one Game struct holds both the world
+and the wire; and the client's own game struct, which carries the netcode as well.
+
+## How Odin lets us say it
+
+Odin has no methods. `x.verb()` exists in exactly one place: a package boundary, where
+`world.step(&w)` is the package `world` and its procedure `step`. Inside a package there
+is only a prefix, `soldier_step(&w.soldiers[i])`. So the rule has two scales, and both
+are the same rule:
+
+- **A struct that wants to be called by name gets a directory.** Its package is named
+  for it, in lower case; the struct itself is named again inside, `world.World`,
+  `match.Match`, `render.Render`, as the client does now. Its procedures carry no
+  prefix: `render.init`, `render.tick`, `render.draw`, `render.destroy`.
+- **A struct that only its parent uses gets a file** in the parent's package, and its
+  procedures carry its name: `Soldier` in world/soldier.odin, `soldier_spawn`,
+  `soldier_step`; `Sparks` in render/sparks.odin, `sparks_draw`. The file is named after
+  the struct.
+- **The parent imports the child, never the reverse.** A child that needs something
+  from above takes it as an argument: the world's Context, a setting's value rather than
+  the Settings struct, the game to draw. That is already the shape of every call in
+  client/main.odin, and it is what keeps the tree a tree.
+- **Structs that refer to each other by type share a package.** Odin refuses an import
+  cycle, and a subdirectory is always another package. The entities are one such knot
+  (a bullet meets the soldiers, a flag reads who touches it, a shot spawns a bullet),
+  so they share the package world/entities/, prefixed inside it.
+- **A child that would need its parent gets a view of it instead.** The entities'
+  steps read the World back, and entities cannot import world. So entities defines a
+  View: pointers to the pools, the map, the rng and the history, and the tick, the
+  gravity, the authority and the flag homes by value. The world builds one of itself
+  at the top of each step and passes it down. What an entity may reach is then written
+  in one place, and a pointer to an array indexes and ranges the same as the array, so
+  `v.soldiers[i]` reads as `w.soldiers[i]` did.
+- **The verbs are the ones in use now.** `init`/`destroy` for what is set up once,
+  `load`/`unload` for art and files, `tick` for one tick of a whole, `step` for one
+  tick of the world, `run` for the match, `draw` for one frame, `receive`/`send` for the
+  wire. A new struct uses these before inventing one.
+- **A field named after a package hides that package from the fields declared after
+  it** (an Odin quirk; see the comment on App.script). So in a struct that owns
+  `game: game.Game`, every other field typed from package `game` is declared before it.
+
+One consequence to accept: splitting a package makes public what was `@(private)` and
+crossed the split. Prefer `@(private = "file")` where a helper really is one file's.
+
+## The tree
+
+The target, with what each package is. A file is the struct it is named for and its
+procedures; where a struct has parts, they follow in parentheses.
+
+```
+shared/                 the layer both executables import, a DAG of packages, listed
+                        bottom up: nothing imports anything above itself
+  geom/     Vec2, the vector arithmetic, point_line_distance, line_circle_collision,
+            round_half_even: what knows no type but Vec2 (from sim/math and sim/level)
+  level/    Level: the map as the game reads it. level (the types, load, destroy),
+            file (the byte reader), query (sectors, ray casts, the polygon tests)
+  anim/     the .poa animations and the .po particle objects: Anims, Anim (one
+            running), Pose, Particle_Object, their parsers and loaders (anim, pose, file)
+  weapons/  Weapon_Id, Bullet_Style, Weapon_Info, the table and its defaults, named
+  game/     Game: game.odin (Game: ctx, world, match; init, tick, destroy; Context,
+            the static data the world reads: anims, weapons, skeletons)
+    world/  World: world.odin (World: the map, the pools, tick, rng, authority, the
+            flag homes; init, step: a View built, every soldier stepped on its command,
+            then the ragdolls, the things, the bullets), spawn (where a team is placed,
+            which polygons a team passes: the rules over the map that were the
+            level's)
+      entities/  the knot: view (View: what an entity may reach), soldier (movement,
+              soldier_anim, combat, antics, soldier_collision, soldier_pose), bullet
+              (bullet_collision, explosion), damage, thing (the pool and its physics:
+              flag, kit, dropped_gun, parachute, stat_gun), ragdoll, event, history,
+              command (Command, Buttons, Team), rand
+    match/  Match: match.odin (Match: settings, time_remaining, score, mode, state;
+            run: the clock, the end, who respawns when), score (Match_Score),
+            settings (Match_Settings: time and score limits, respawn time, grenades,
+            friendly fire, kits collide)
+      rules/  the modes: rules.odin (Mode, what an event scores, when a match is
+              over), ctf, dm
+  bot/      Bot: the brain, played by the server and by the headless client
+            (bot, fight, path, file)
+  net/      Stream (stream), Message and the protocol (protocol), Fake_Link (fake_link)
+  pms/      Map, Reader, Writer: the codec that keeps every field         unchanged
+  cvar/     Cvar, Set                                                     unchanged
+  timer/    the fine sleep                                                unchanged
+
+server/
+  server.odin   Server: settings, game, rotation, bots, net, vote; main and the loop
+  settings.odin Settings, and Match_Settings and the net's settings built from it
+  rotation.odin Rotation: the maps played in turn, next_round, map_load
+  bots.odin     Bots: the slots the server plays itself and their profiles
+  net/          Net: the wire. Host (host: ENet, the peers by slot), Client (client:
+                connected, name, queue, lag, the tallies), Queue (queue), and net.odin:
+                receive and its parts, send and its parts, tell_born, in_view,
+                could_reach, born / ends / shot_seq / things_sent, the scratch messages,
+                and its own settings: max_rewind, update_others
+  vote/         Vote: what is being voted on and its clock. It decides; the net carries
+                it; the server applies a passed kick or map
+
+client/
+  client.odin   Client: settings, debug, game, me, predict, view, net, engine, hud;
+                main, the loop, run_headless
+  settings.odin Settings
+  debug.odin    Debug
+  predict/      Predict: my soldier over the server's word. pending and seq (the
+                commands the server has not run), the error blending out and its
+                measures, my_prev; reconcile, predict_tick, drawn_pos
+  view/         View: the others between two of the server's words; the view tick
+  net/          Net: Connection (connection: ENet, the fake line) and net.odin: receive
+                and its parts, send, the clock (depth, time_scale, clock_target),
+                newest, seen_shot, my_lag, the roster (names, lags, the bot slots),
+                and what is told once (acts, called, asked, said: choose_weapons,
+                choose_team, say, call_kick, call_map, vote_yes, vote_no, ask_map)
+  engine/       Engine: the raylib side. engine.odin (the window, the frame clock,
+                ticks_owed), then
+    input/      Input, Script
+    render/     Render, Camera (camera), Map_View, Minimap, Gostek, Bullet_Art,
+                Things_Art, Sparks, Sprite, the texture loaders    as now
+    audio/      Audio                                             as now
+  hud/          Hud and its parts                                 as now
+  editor/       Editor: the other program in the binary            as now
+```
+
+Who imports whom. In shared: world imports entities; match imports rules and world;
+rules imports entities (the events); game imports world and match; bot and net import
+game, and entities for the soldiers, the bullets and the things they read. The world never hears of the match:
+what it does that the match must know (a capture, a kill, a death) it emits as an event,
+as it does now, and the match reads the events and scores them; what the match decides
+(a respawn, the end) it does through world's procedures. On the server, net imports
+game and vote, vote imports game, server imports all three. On the client, predict and
+view import game; net imports game, predict and view; engine's render and audio import
+game and view; hud imports game and engine/render; client imports all of them. No line
+runs upward.
+
+**The pools.** The world keeps one `things` pool for the flags, the kits, the dropped
+guns, the parachutes and the stationary guns, as it has now, with a file per kind. They
+share one Verlet body and one physics, and the wire names them by pool index. Typed
+pools (`flags[2]`, `kits[]`, `dropped_guns[]`) would read better and are a fair later
+step, but they change the protocol and every place that walks the pool, so they are not
+part of this refactor.
+
+**The names.** The words are the code's current ones (bullet, thing, kit) so that each
+commit is a move and not a rename. A rename (bullet to projectile, kit to pickup) is a
+find-and-replace to do at the end, once, if wanted.
+
+## What moves, in order
+
+Three stages, each a branch (`refactor/shared`, `refactor/server`, `refactor/client`)
+merged with its history, each commit a `refactor(scope)` that changes no behaviour.
+Before each commit lands: `check`, `test`, and a `dev -sv_bots 2` that plays. Each
+commit rewrites its callers in the client and the server in the same commit (a
+`sim.Vec2` becomes a `world.Vec2`); nothing is aliased to be cleaned up later. The wire
+does not change at any point, so a client from before a stage talks to a server from
+after it.
+
+### Stage 1: shared
+
+The sim gives up what only points downward, then becomes the game. Each step is one
+commit, in this order, because each depends on the one before.
+
+1. **geom.** sim/math.odin's Vec2, vector procs, point_line_distance and
+   round_half_even, and level.odin's line_circle_collision, become shared/geom. The
+   tests against a Polygon (point_in_poly, line_in_poly, closest_perpendicular) stay
+   with the level. The rng stays in the sim (rand.odin): it is the sim's determinism,
+   not arithmetic. `Vec2 :: geom.Vec2` in the sim keeps `sim.Vec2` for everyone
+   above; this one alias stays, because everything above the world speaks in its terms.
+2. **level.** sim/level.odin and level_file.odin become shared/level, and the one file
+   becomes three: level (the types, load, destroy), file (the byte reader), query
+   (sectors, ray casts, the collision tests). Two things move up into the sim instead
+   of across: `level_spawn_point` (it takes a Team and rolls the rng) and
+   `team_collides` / `bullet_team_collides` (which polygons a team passes is a rule of
+   the game, not a fact of the map). The Level keeps its spawnpoints; the sim picks.
+3. **weapons.** sim/weapons.odin becomes shared/weapons: the ids, the styles, the
+   table, its defaults and `named`. The Weapon a soldier holds (ammo, the reload
+   clocks) is state and stays with the soldier, in combat.odin.
+4. **anim.** The data half of soldier_anim.odin (Anim_Id, Anim_Info, Anim_Data, Anims,
+   Anim, advance, set, parse), pose.odin's Pose and Particle_Object with their parsers,
+   and anim_file.odin's loaders become shared/anim. `soldier_pose` stays in the sim, in
+   its own file; so do Skeletons and their loader, which are the things'.
+5. **entities, and world over them.** shared/sim becomes shared/game/world/entities:
+   the package renamed, Command, Buttons and Team into command.odin, math.odin's rng
+   into rand.odin. World, world_init and step leave for shared/game/world/world.odin,
+   with level_spawn_point and the team collision tests beside them in spawn.odin.
+   entities/view.odin is the View, and every entity procedure that took `w: ^World`
+   takes `v: ^View`: the pools index the same through the pointer, `&w.rng` becomes
+   `v.rng`, and `w.round` goes (next step). round.odin and Match_State come out with it;
+   `step` no longer ticks the round. Every `sim.` above becomes `entities.` or
+   `world.`, and the sim.odin header is rewritten as world.odin's and entities'.
+6. **match, and game over it.** shared/game/match holds Match (settings,
+   time_remaining, score, mode, state) and `run`: the clock, the end of the round when
+   the score or the time is reached, the scores standing, and who is placed again and
+   when (soldier_served_tick's respawn counting moves here, reading the world's dead
+   and calling `world.soldier_respawn`). match/rules holds what the mode makes of an
+   event: ctf.odin scores a Flag_Score for a team, and says the match is over at the
+   score limit; dm.odin scores a Kill for a player, the same shape, so that the mode
+   the to-do list wants has its place before it exists. shared/game/game.odin is Game
+   (ctx, world, match) with `init`, `tick` (world.step, then match.run over its events)
+   and `destroy`; the tests' whole-world tick calls it. The server's Rules struct is
+   split: time_limit, score_limit, respawn_time, max_grenades, friendly_fire and
+   kits_collide become match.Match_Settings; max_rewind and update_others are the
+   net's; bots_difficulty and bots_chat the bots'; vote_percent the vote's.
+7. **bot.** bot.odin, bot_fight, bot_path and bot_file become shared/bot, files named
+   bot, fight, path, file, importing game.
+
+Each commit updates build.odin's LIBRARIES and moves the tests that belong to the new
+package (movement_test and ragdoll_test step a whole world, so they go with world).
+
+Optional polish in the same stage, one commit: net's files named for their structs
+(serialize.odin to stream.odin, fakelink.odin to fake_link.odin).
+
+### Stage 2: server
+
+1. **The wire out of the game.** server/game.odin's Client, Queue, born, ends,
+   shot_seq, things_sent, the scratch messages and every receive_* and send_* move to
+   server/net with Host. `step_soldiers` takes the tick's commands as an argument, the
+   way `world.step` does; the net's queues give them.
+2. **What is left of the server's game** is the shared Game plus the map rotation
+   (rotation.odin: the maps in turn, next_round, map_load, round_start) and the bots
+   it plays (bots.odin: the slots, the brains, the profiles, add_bot, bot_chat). Both
+   are files of the server's root package, owned by Server.
+3. **Vote as a package.** vote.odin becomes server/vote, importing game only. Its
+   `receive` is called by the net and its state is sent by the net; a passed vote comes
+   back as a result the server applies (a kick through the net, a map through the
+   rotation).
+4. **Server.** main.odin becomes server.odin; Server is settings, game, rotation,
+   bots, net, vote; `init` builds Match_Settings and the net's settings from Settings.
+
+### Stage 3: client
+
+1. **The wire out of the game.** client/game/game.odin's receive and its parts, send,
+   the clock, newest, seen_shot, my_lag, server_depth, the roster and the told-once
+   queues move to client/net with Connection. What the HUD tells the game (weapons, a
+   team, a line) it tells through the net.
+2. **Predict and view as packages.** predict.odin becomes client/predict, owning
+   pending, seq, the error and its measures, my_prev, `reconcile`, `predict_tick` and
+   `drawn_pos`; view.odin becomes client/view. What is left of client/game is the
+   shared Game, and the package goes: Client owns `game: game.Game` directly, with
+   `me` beside it.
+3. **Engine.** client/engine holds the window, the frame clock and ticks_owed from
+   main.odin, and input/, render/ and audio/ move under it; Camera moves into render.
+   hud's and editor's imports follow.
+4. **Client.** main.odin becomes client.odin, App becomes Client with game, me,
+   predict, view, net, engine and hud.
+
+### Afterwards
+
+docs/architecture.md's layout block and the tick listings are rewritten to the tree
+above; docs/conventions.md's scopes become `geom`, `level`, `anim`, `weapons`, `game`,
+`world`, `match`, `bot`, `net`, `client`, `server`, and the rules under "How Odin lets
+us say it" move there as the way new code is placed. The readme's mentions of
+shared/sim and client/game/predict.odin follow.
+
+## What does not change
+
+- **The entities' knot.** Soldier, Bullet, Thing, Ragdoll, History, Events and damage
+  stay one package. Its files are already a struct each with a prefix, which is the
+  in-package half of the rule.
+- **The things pool, and the words.** See above: typed pools and renames are later
+  steps, taken on purpose, not by the way.
+- **pms, cvar, timer, the editor, hud, render's internals.** Already a struct per file,
+  or a package that is one struct.
+- **Behaviour, and the wire.** Every commit is a refactor. If a test wants changing,
+  the change is wrong.
