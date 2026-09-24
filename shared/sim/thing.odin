@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // The thing pool and what every thing shares: a small Verlet skeleton (two points
 // for a gun, four for a flag, kit, parachute or stationary gun), its physics against
@@ -149,7 +150,7 @@ thing_clear :: proc(t: ^Thing) {
 }
 
 // A random active spawn point of this exact kind.
-level_thing_spawn :: proc(m: ^Level, kind: i32, rng: ^u64) -> (pos: Vec2, ok: bool) {
+level_thing_spawn :: proc(m: ^polymap.Polymap, kind: i32, rng: ^u64) -> (pos: Vec2, ok: bool) {
 	count := 0
 	for s in m.spawnpoints do if s.active && s.team == kind do count += 1
 	if count == 0 do return {}, false
@@ -330,7 +331,7 @@ thing_collide :: proc(ctx: ^Context, t: ^Thing, k: int, at: Vec2, team: Team) ->
 	probe := at - {0, THING_LIFT}
 	flag := is_flag(t.style)
 	hit := false
-	for idx in sector_polys(level, probe) {
+	for idx in polymap.sector_polys(level, probe) {
 		poly := &level.polys[idx]
 		ty := poly.type
 		#partial switch ty {
@@ -338,9 +339,9 @@ thing_collide :: proc(ctx: ^Context, t: ^Thing, k: int, at: Vec2, team: Team) ->
 			continue
 		}
 		if flag && ty >= .Red_Bullets && ty <= .Green_Player do continue
-		if team != .None && !team_collides(ty, team) do continue
-		if !point_in_poly_edges(probe, poly) do continue
-		normal, dist, _ := closest_perpendicular(poly, probe)
+		if team != .None && !polymap.team_collides(ty, team) do continue
+		if !polymap.point_in_poly_edges(probe, poly) do continue
+		normal, dist, _ := polymap.closest_perpendicular(poly, probe)
 		push := geom.vec2_normalize(normal) * dist
 		p, o := &t.pos[k], &t.old_pos[k]
 		if flag && k == 0 {

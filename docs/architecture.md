@@ -3,14 +3,17 @@
 Where everything lives, and how the client and the server each spend a tick.
 
 ```
-shared/sim/  the simulation, shared, one file per object: level (the map: loading,
-             sectors, collision queries), soldier (movement, soldier_anim, combat,
-             antics, soldier_collision), bullet (bullet_collision, explosion), damage
-             (the one place health changes), thing (flag, kit, dropped_gun, parachute,
-             stat_gun), ragdoll, history (the server's rewind), round, event (a tagged
-             union), bot (the brain of the server's bots and of the test client), rand
+shared/sim/  the simulation, shared, one file per object: soldier (movement,
+             soldier_anim, combat, antics, soldier_collision), spawn (where a team is
+             placed), bullet (bullet_collision, explosion), damage (the one place health
+             changes), thing (flag, kit, dropped_gun, parachute, stat_gun), ragdoll,
+             history (the server's rewind), round, event (a tagged union), bot (the
+             brain of the server's bots and of the test client), rand
 shared/geom/ Vec2 and the arithmetic the sim shares: the vector procedures, the distances,
              the banker's rounding, on one float path so every world computes the same
+shared/polymap/  the map as the game reads it: the polygons in sectors, the colliders,
+             the spawns and the waypoints, read from a .pms (file), the queries on it
+             (query), and Team as the map knows it
 shared/cvar/ the settings: a name, a value, a default and a line of help, set from
              config.cfg and the command line
 shared/net/  the wire: serialize (one Stream that reads or writes), protocol (Hello,

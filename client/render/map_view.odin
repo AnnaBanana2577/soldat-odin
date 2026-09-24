@@ -3,6 +3,7 @@ package render
 import "core:math"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
+import "../../shared/polymap"
 import "../../shared/sim"
 
 // One map, ready to draw: its polygons as meshes, the texture they wear, and the images
@@ -11,7 +12,7 @@ import "../../shared/sim"
 // editor owns one and draws it whole.
 
 Map_View :: struct {
-	level:   ^sim.Level,      // borrowed; the owner outlives the view
+	level:   ^polymap.Polymap,      // borrowed; the owner outlives the view
 	texture: rl.Texture2D,    // id 0 draws the polygons untextured
 	scenery: []rl.Texture2D,  // one per entry in Level.scenery, id 0 where it failed to load
 	meshes:  Map_Meshes,
@@ -29,7 +30,7 @@ Map_Meshes :: struct {
 }
 
 // Read a map's art and build its meshes. The window must be open.
-map_view_load :: proc(v: ^Map_View, base: string, level: ^sim.Level) {
+map_view_load :: proc(v: ^Map_View, base: string, level: ^polymap.Polymap) {
 	map_view_unload(v)
 	v.level = level
 	v.texture = map_texture_load(base, level.texture)
@@ -80,7 +81,7 @@ map_view_draw :: proc(v: ^Map_View, camera: ^Camera, parts := ALL_PARTS) {
 }
 
 // The box the map's polygons fill, which is what a view frames when a map opens.
-map_view_bounds :: proc(level: ^sim.Level) -> (low, high: sim.Vec2) {
+map_view_bounds :: proc(level: ^polymap.Polymap) -> (low, high: sim.Vec2) {
 	if level == nil || len(level.polys) == 0 do return {-640, -480}, {640, 480}
 	low, high = {max(f32), max(f32)}, {min(f32), min(f32)}
 	for &poly in level.polys {
@@ -93,7 +94,7 @@ map_view_bounds :: proc(level: ^sim.Level) -> (low, high: sim.Vec2) {
 }
 
 @(private)
-map_meshes_build :: proc(m: ^Map_Meshes, level: ^sim.Level, texture: rl.Texture2D) {
+map_meshes_build :: proc(m: ^Map_Meshes, level: ^polymap.Polymap, texture: rl.Texture2D) {
 	m.background = build_poly_mesh(level, background = true)
 	m.terrain = build_poly_mesh(level, background = false)
 	m.material = rl.LoadMaterialDefault()
@@ -110,7 +111,7 @@ map_meshes_unload :: proc(m: ^Map_Meshes) {
 }
 
 @(private = "file")
-build_poly_mesh :: proc(level: ^sim.Level, background: bool) -> (mesh: rl.Mesh) {
+build_poly_mesh :: proc(level: ^polymap.Polymap, background: bool) -> (mesh: rl.Mesh) {
 	count := 0
 	for &poly in level.polys {
 		is_bg := poly.type == .Background || poly.type == .Background_Transition
@@ -144,8 +145,8 @@ build_poly_mesh :: proc(level: ^sim.Level, background: bool) -> (mesh: rl.Mesh) 
 // The sky gradient. The original anchors it in world space vertically, spanning +/-d
 // about the origin, and stretches it across the view, so it scrolls with the camera.
 @(private)
-draw_background :: proc(level: ^sim.Level, camera: ^Camera) {
-	d := f32(sim.MAX_SECTOR) * max(f32(level.sectors_division), math.ceil(0.5 * GAME_HEIGHT / f32(sim.MAX_SECTOR)))
+draw_background :: proc(level: ^polymap.Polymap, camera: ^Camera) {
+	d := f32(polymap.MAX_SECTOR) * max(f32(level.sectors_division), math.ceil(0.5 * GAME_HEIGHT / f32(polymap.MAX_SECTOR)))
 	half_width := view_size(camera).x / 2
 	x0, x1 := camera.pos.x - half_width, camera.pos.x + half_width
 	top, bottom := level.bg_top, level.bg_bottom
@@ -190,7 +191,7 @@ draw_scenery :: proc(v: ^Map_View, layer: u8) {
 }
 
 @(private)
-prop_corners :: proc(prop: ^sim.Prop) -> (p0, p1, p2, p3: sim.Vec2) {
+prop_corners :: proc(prop: ^polymap.Prop) -> (p0, p1, p2, p3: sim.Vec2) {
 	angle := -prop.rotation
 	c, s := math.cos(angle), math.sin(angle)
 	cx, cy: f32 = 0, 1
@@ -210,7 +211,7 @@ prop_corners :: proc(prop: ^sim.Prop) -> (p0, p1, p2, p3: sim.Vec2) {
 }
 
 @(private)
-draw_wireframe :: proc(level: ^sim.Level) {
+draw_wireframe :: proc(level: ^polymap.Polymap) {
 	for &poly in level.polys {
 		for k in 0 ..< 3 {
 			a, b := poly.verts[k], poly.verts[(k + 1) % 3]

@@ -2,6 +2,7 @@ package render
 
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
+import "../../shared/polymap"
 import "../../shared/sim"
 
 // The minimap: the map drawn once into a small texture when it loads, which the HUD
@@ -27,7 +28,7 @@ minimap_place :: proc(m: ^Minimap, pos: sim.Vec2) -> sim.Vec2 {
 }
 
 @(private)
-minimap_build :: proc(m: ^Minimap, level: ^sim.Level, meshes: ^Map_Meshes) {
+minimap_build :: proc(m: ^Minimap, level: ^polymap.Polymap, meshes: ^Map_Meshes) {
 	minimap_unload(m)
 	if len(level.polys) == 0 do return
 	m.min, m.max = level.polys[0].verts[0], level.polys[0].verts[0]

@@ -3,6 +3,7 @@ package sim
 import "core:fmt"
 import "core:testing"
 import "../geom"
+import "../polymap"
 
 // The corpses: a body falls, lands and stays on top of the map, and bullets meet it
 // where it lies — blood, a body slowing the shot down, and a corpse shot enough coming
@@ -11,7 +12,7 @@ import "../geom"
 
 @(private = "file")
 Fixture :: struct {
-	level:  Level,
+	level:  polymap.Polymap,
 	anims:  ^Anims,
 	skels:  ^Skeletons,
 	ctx:    Context,
@@ -25,7 +26,7 @@ Fixture :: struct {
 @(private = "file")
 fixture :: proc(map_name: string) -> (f: ^Fixture, ok: bool) {
 	f = new(Fixture)
-	f.level = level_load_file("assets", map_name) or_return
+	f.level = polymap.load_file("assets", map_name) or_return
 	f.anims = anims_load_files("assets") or_return
 	f.skels = skeletons_load_files("assets") or_return
 	f.ctx = {level = &f.level, anims = f.anims, skeletons = f.skels}
@@ -35,7 +36,7 @@ fixture :: proc(map_name: string) -> (f: ^Fixture, ok: bool) {
 	f.world.authority = true
 	teams := []Team{.Alpha, .Bravo}
 	for team, i in teams {
-		pos := level_spawn_point(&f.level, team, &f.world.rng)
+		pos := spawn_point(&f.level, team, &f.world.rng)
 		soldier_spawn(&f.ctx, &f.world.soldiers[i], pos, team, .AK74, .Colt)
 		f.world.soldiers[i].cease_fire_counter = -1
 		f.cmds[i].aim = pos
@@ -49,7 +50,7 @@ fixture_destroy :: proc(f: ^Fixture) {
 	free(f.world)
 	free(f.anims)
 	free(f.skels)
-	level_destroy(&f.level)
+	polymap.destroy(&f.level)
 	free(f)
 }
 
@@ -90,10 +91,10 @@ buried :: proc(f: ^Fixture, index: u8) -> f32 {
 	deepest: f32
 	for i in 0 ..< POSE_POINTS {
 		if i in RAGDOLL_NO_COLLIDE do continue
-		for idx in sector_polys(&f.level, r.pos[i]) {
+		for idx in polymap.sector_polys(&f.level, r.pos[i]) {
 			poly := &f.level.polys[idx]
-			if !soldier_collides_with(s, poly.type) || !point_in_poly(r.pos[i], poly) do continue
-			if _, d, _ := closest_perpendicular(poly, r.pos[i]); d > deepest do deepest = d
+			if !soldier_collides_with(s, poly.type) || !polymap.point_in_poly(r.pos[i], poly) do continue
+			if _, d, _ := polymap.closest_perpendicular(poly, r.pos[i]); d > deepest do deepest = d
 		}
 	}
 	return deepest

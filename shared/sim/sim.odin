@@ -35,6 +35,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 TICK_RATE :: 60
 TICK      :: 1.0 / f64(TICK_RATE)
@@ -62,11 +63,11 @@ Command :: struct {
 	aim:     Vec2, // world-space cursor
 }
 
-Team :: enum u8 { None, Alpha, Bravo, Charlie, Delta, Spectator }
+Team :: polymap.Team
 
 // Static data a step reads and never writes.
 Context :: struct {
-	level:     ^Level,
+	level:     ^polymap.Polymap,
 	anims:     ^Anims,
 	weapons:   Weapons,
 	skeletons: ^Skeletons, // the things' particle objects

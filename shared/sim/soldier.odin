@@ -122,7 +122,7 @@ soldier_spawn :: proc(ctx: ^Context, s: ^Soldier, pos: Vec2, team: Team, primary
 // The server places a soldier on one of its team's spawn points: a new life.
 soldier_respawn :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	s := &w.soldiers[index]
-	pos := level_spawn_point(ctx.level, s.team, &w.rng)
+	pos := spawn_point(ctx.level, s.team, &w.rng)
 	soldier_spawn(ctx, s, pos, s.team, s.primary_choice, s.secondary_choice)
 	s.life += 1
 	emit(events, Respawn{target = index, life = s.life, team = s.team, primary = s.primary_choice, secondary = s.secondary_choice, pos = pos})

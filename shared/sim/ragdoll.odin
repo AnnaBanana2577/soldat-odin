@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // Corpses: a dead soldier's gostek skeleton run as a Verlet particle system, from
 // the dead-soldier branches of Sprites.pas (Update, Die, CheckSkeletonMapCollision)
@@ -162,11 +163,11 @@ ragdoll_collide :: proc(ctx: ^Context, w: ^World, index: u8, i: int, events: ^Ev
 	at := r.pos[i] // the position the whole check is measured from, as the original passes it in
 	probe := at + {-1, 4}
 	bg_test_big_poly_center(level, &s.bg, probe)
-	for idx in sector_polys(level, probe) {
+	for idx in polymap.sector_polys(level, probe) {
 		poly := &level.polys[idx]
-		if !soldier_collides_with(s, poly.type) || !point_in_poly_edges(probe, poly) do continue
+		if !soldier_collides_with(s, poly.type) || !polymap.point_in_poly_edges(probe, poly) do continue
 		if bg_test(level, &s.bg, idx) do continue
-		normal, dist, _ := closest_perpendicular(poly, probe)
+		normal, dist, _ := polymap.closest_perpendicular(poly, probe)
 		r.pos[i] = r.old_pos[i] - geom.vec2_normalize(normal) * dist
 		// the thud of a body landing, for whoever is listening; the count quiets it
 		if fall := abs(r.pos[i].y - r.old_pos[i].y); fall > CORPSE_THUD_FALL && r.hits < CORPSE_THUD_HITS {
@@ -179,11 +180,11 @@ ragdoll_collide :: proc(ctx: ^Context, w: ^World, index: u8, i: int, events: ^Ev
 
 	probe = at + {0, 1}
 	bg_test_big_poly_center(level, &s.bg, probe)
-	for idx in sector_polys(level, probe) {
+	for idx in polymap.sector_polys(level, probe) {
 		poly := &level.polys[idx]
-		if poly.type == .Doesnt || poly.type == .Only_Bullets || !point_in_poly_edges(probe, poly) do continue
+		if poly.type == .Doesnt || poly.type == .Only_Bullets || !polymap.point_in_poly_edges(probe, poly) do continue
 		if bg_test(level, &s.bg, idx) do continue
-		normal, dist, _ := closest_perpendicular(poly, probe)
+		normal, dist, _ := polymap.closest_perpendicular(poly, probe)
 		r.pos[i] = r.old_pos[i] - geom.vec2_normalize(normal) * dist
 	}
 }

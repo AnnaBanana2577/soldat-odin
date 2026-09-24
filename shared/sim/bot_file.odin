@@ -6,6 +6,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "../polymap"
 
 // The bots' personality files from the base assets folder (assets/bots/*.bot): file
 // I/O, kept out of the pure sim files. Each file is one of the original's bots, and
@@ -16,7 +17,7 @@ import "core:strings"
 Bot_Profile :: struct {
 	name:      string,
 	// The look. Nothing draws it yet: the roster carries names only.
-	shirt, pants, hair_color, skin: Color,
+	shirt, pants, hair_color, skin: polymap.Color,
 	hair, headgear, chain: u8,
 
 	favourite:    Weapon_Id, // what it likes to spawn with, .None for bare hands
@@ -87,7 +88,7 @@ bot_profile_parse :: proc(text: string, allocator := context.allocator) -> (p: B
 		return parsed ? n : missing
 	}
 	// $00RRGGBB, or plain decimal.
-	color :: proc(text, key: string) -> Color {
+	color :: proc(text, key: string) -> polymap.Color {
 		field := value(text, key)
 		n: u64
 		if strings.has_prefix(field, "$") {

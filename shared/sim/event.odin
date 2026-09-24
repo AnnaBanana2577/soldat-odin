@@ -1,5 +1,7 @@
 package sim
 
+import "../polymap"
+
 // What happened this tick, for whoever is listening: the client's sparks, sounds and
 // messages, the server's wounds. A tagged union, so each
 // kind carries its own fields by name.
@@ -60,7 +62,7 @@ Weapon_Pickup :: struct { player: u8, thing: u8, weapon: Weapon_Id, ammo: i32, p
 Weapon_Drop :: struct { player: u8, weapon: Weapon_Id, ammo: i32, thrown: bool } // thrown by hand, or let go of by a death
 Thing_Hit :: struct { thing: Thing_Style, pos, vel: Vec2, part: u8 }
 Match_End :: struct { winner: Team }
-Poly_Effect :: struct { target: u8, type: Poly_Type, pos: Vec2, spark: bool } // a hurting, lava, regenerating or exploding poly touched
+Poly_Effect :: struct { target: u8, type: polymap.Poly_Type, pos: Vec2, spark: bool } // a hurting, lava, regenerating or exploding poly touched
 // A corpse's point struck the map hard enough to be heard: how far it fell in that
 // tick, and how many times the body had already landed (DeadCollideCount), which is
 // what the original gates the thud and the bone crack on. Never leaves the machine

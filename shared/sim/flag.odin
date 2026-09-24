@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // The flags: hanging from a carrier's hand, dropped, thrown, returned, captured,
 // timing out back to base. Ported from the flag parts of things.lua and rules.lua.
@@ -108,7 +109,7 @@ flag_throw :: proc(ctx: ^Context, w: ^World, t: ^Thing, holder: ^Soldier) {
 	b := d + holder.vel
 	n := o + b
 	for k in 0 ..< 3 {
-		if _, blocked := ray_cast(ctx.level, pose[14], t.pos[k] + n, 200, {flag = true, player = true}); blocked do return
+		if _, blocked := polymap.ray_cast(ctx.level, pose[14], t.pos[k] + n, 200, {flag = true, player = true}); blocked do return
 	}
 	for k in 0 ..< 4 {
 		t.old_pos[k] = t.pos[k] + o - b

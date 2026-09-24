@@ -6,6 +6,7 @@ import "core:math"
 import "core:path/filepath"
 import rl "vendor:raylib"
 import "../../shared/geom"
+import "../../shared/polymap"
 import "../../shared/sim"
 
 // The particle effects: chips off walls, blood, smoke, explosions. From Sparks.pas
@@ -90,7 +91,7 @@ spark_add :: proc(s: ^Sparks, pos, vel: sim.Vec2, style: Spark_Style, life: f32,
 }
 
 // One tick for every live spark, at the game's 60 Hz.
-sparks_update :: proc(s: ^Sparks, level: ^sim.Level) {
+sparks_update :: proc(s: ^Sparks, level: ^polymap.Polymap) {
 	for &spark in s.pool {
 		if spark.style == .None do continue
 		if spark.style in SPARK_MOVES {
@@ -106,16 +107,16 @@ sparks_update :: proc(s: ^Sparks, level: ^sim.Level) {
 
 // Point collision as TSpark.CheckMapCollision does it, with its probe offset of (-8, -1).
 @(private = "file")
-spark_collide :: proc(level: ^sim.Level, spark: ^Spark) {
+spark_collide :: proc(level: ^polymap.Polymap, spark: ^Spark) {
 	probe := spark.pos + {-8, -1}
-	for index in sim.sector_polys(level, probe) {
+	for index in polymap.sector_polys(level, probe) {
 		poly := &level.polys[index]
 		#partial switch poly.type {
 		case .Only_Bullets, .Only_Player, .Doesnt, .Background, .Background_Transition:
 			continue
 		}
-		if !sim.point_in_poly_edges(probe, poly) do continue
-		normal, dist, _ := sim.closest_perpendicular(poly, probe)
+		if !polymap.point_in_poly_edges(probe, poly) do continue
+		normal, dist, _ := polymap.closest_perpendicular(poly, probe)
 		spark.vel -= geom.vec2_normalize(normal) * dist
 		spark.vel *= SPARK_SURFACECOEF
 		return

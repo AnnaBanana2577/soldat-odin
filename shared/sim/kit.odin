@@ -61,7 +61,7 @@ kit_spawn :: proc(ctx: ^Context, w: ^World, style: Thing_Style) {
 // A bonus kit at its own spawn kind, or any soldier spawn, with its lifetime.
 bonus_spawn :: proc(ctx: ^Context, w: ^World, style: Thing_Style) {
 	pos, ok := level_thing_spawn(ctx.level, BONUS_SPAWN[style], &w.rng)
-	if !ok do pos = level_spawn_point(ctx.level, .None, &w.rng)
+	if !ok do pos = spawn_point(ctx.level, .None, &w.rng)
 	if i, created := thing_create(ctx, w, style, pos); created do w.things[i].timeout = KIT_TIMEOUT
 }
 

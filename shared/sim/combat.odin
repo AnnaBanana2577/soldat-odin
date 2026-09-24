@@ -2,6 +2,7 @@ package sim
 
 import "core:math"
 import "../geom"
+import "../polymap"
 
 // The weapon in hand: firing with the spread and bink, the reloads, changing,
 // throwing grenades and the gun, the punch and the rifle butt. Ported from
@@ -240,7 +241,7 @@ fire_weapon :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	vel := geom.vec2_normalize(aim_dir + dev) * info.speed + s.vel * info.inherit
 
 	// a muzzle inside a wall (the head in a ceiling) is lowered a bit
-	if _, hit := collision_test(ctx.level, origin); hit do origin.y += 2.5
+	if _, hit := polymap.collision_test(ctx.level, origin); hit do origin.y += 2.5
 
 	spread :: proc(s: ^Soldier, v: Vec2, amount: f32) -> Vec2 {
 		return v + {(rand_f32(&s.rng) * 2 - 1) * amount, (rand_f32(&s.rng) * 2 - 1) * amount}
@@ -380,8 +381,8 @@ throw_grenade :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 
 		origin := pose[14] + vel * 3 - {0, 2}
 		head := s.pos - {0, 12}
-		_, in_wall := collision_test(ctx.level, origin)
-		_, blocked := ray_cast(ctx.level, head, origin, 50, {bullet = true, team = s.team})
+		_, in_wall := polymap.collision_test(ctx.level, origin)
+		_, blocked := polymap.ray_cast(ctx.level, head, origin, 50, {bullet = true, team = s.team})
 		if !in_wall && !blocked {
 			bullet_spawn(ctx, w, origin, vel, .Frag, index, frag.damage, events)
 			s.grenades -= 1

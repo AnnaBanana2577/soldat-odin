@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // The soldier against the map, in the original's order: the head's two points, the
 // legs' two points (only the second if the first missed), the swept circle, the
@@ -54,11 +55,11 @@ soldier_collide :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 	}
 	if body_y == 0 {
 		p := s.pos + {2, 1.9}
-		if _, hit := ray_cast(level, p, p, 10); hit do body_y = 0.25
+		if _, hit := polymap.ray_cast(level, p, p, 10); hit do body_y = 0.25
 	}
 	if arm_s == 0 {
 		p := s.pos + {-2, 1.9}
-		if _, hit := ray_cast(level, p, p, 10); hit do arm_s = 0.25
+		if _, hit := polymap.ray_cast(level, p, p, 10); hit do arm_s = 0.25
 	}
 
 	// legs: only the second side if the first didn't collide
@@ -84,7 +85,7 @@ soldier_collide :: proc(ctx: ^Context, w: ^World, index: u8, events: ^Events) {
 // What a special poly does when a soldier touches it (HandleSpecialPolyTypes). The
 // soldier reports its own wound as a Hit on itself.
 @(private = "file")
-handle_special_poly :: proc(ctx: ^Context, w: ^World, index: u8, t: Poly_Type, pos: Vec2, events: ^Events) {
+handle_special_poly :: proc(ctx: ^Context, w: ^World, index: u8, t: polymap.Poly_Type, pos: Vec2, events: ^Events) {
 	s := &w.soldiers[index]
 	self_hit :: proc(w: ^World, index: u8, amount: f32, events: ^Events) {
 		s := &w.soldiers[index]
@@ -134,18 +135,18 @@ check_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2, area:
 	s := &w.soldiers[index]
 	pos := at + s.vel
 
-	polys := sector_polys(level, pos)
+	polys := polymap.sector_polys(level, pos)
 	if polys == nil do return false
 	bg_test_big_poly_center(level, &s.bg, pos)
 
 	for idx in polys {
 		poly := &level.polys[idx]
-		if !soldier_collides_with(s, poly.type) || !point_in_poly(pos, poly) do continue
+		if !soldier_collides_with(s, poly.type) || !polymap.point_in_poly(pos, poly) do continue
 		if bg_test(level, &s.bg, idx) do continue
 
 		handle_special_poly(ctx, w, index, poly.type, pos, events)
 
-		normal, dist, _ := closest_perpendicular(poly, pos)
+		normal, dist, _ := polymap.closest_perpendicular(poly, pos)
 		push := normal * dist
 		speed := geom.vec2_length(s.vel)
 		if geom.vec2_length(push) > speed do push = geom.vec2_normalize(push) * speed
@@ -163,7 +164,7 @@ check_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2, area:
 }
 
 @(private = "file")
-apply_ground_friction :: proc(w: ^World, s: ^Soldier, poly: ^Polygon, normal: Vec2) {
+apply_ground_friction :: proc(w: ^World, s: ^Soldier, poly: ^polymap.Polygon, normal: Vec2) {
 	#partial switch s.legs.id {
 	case .Stand, .Crouch, .Prone, .Prone_Move, .Get_Up, .Fall, .Mercy, .Mercy2, .Own:
 		// Standing still on a walkable slope: cancel gravity so you don't slide.
@@ -210,18 +211,18 @@ check_radius_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2
 
 	for _ in 0 ..< steps {
 		spos += step
-		for idx in sector_polys(level, spos) {
+		for idx in polymap.sector_polys(level, spos) {
 			poly := &level.polys[idx]
 			t := poly.type
-			collides := team_collides(t, s.team)
+			collides := polymap.team_collides(t, s.team)
 			if (!s.holding_flag && t == .Only_Flaggers) || (s.holding_flag && t == .Not_Flaggers) do collides = false
 			if !collides || t == .Doesnt || t == .Only_Bullets do continue
 			for k in 0 ..< 3 {
 				probe := spos - poly.perp[k] * SPRITE_COL_RADIUS
-				if !point_in_poly_edges(probe, poly) do continue
+				if !polymap.point_in_poly_edges(probe, poly) do continue
 				if bg_test(level, &s.bg, idx) do continue
 				if !has_collided do handle_special_poly(ctx, w, index, t, probe, events)
-				normal, _, edge := closest_perpendicular(poly, spos)
+				normal, _, edge := polymap.closest_perpendicular(poly, spos)
 				dist := geom.point_line_distance(poly.verts[edge], poly.verts[(edge + 1) % 3], probe)
 				s.pos = s.old_pos
 				s.vel = s.forces - normal * dist
@@ -236,7 +237,7 @@ check_radius_map_collision :: proc(ctx: ^Context, w: ^World, index: u8, at: Vec2
 check_map_vertices_collision :: proc(ctx: ^Context, w: ^World, index: u8, pos: Vec2, r: f32, has_collided: bool, events: ^Events) -> bool {
 	level := ctx.level
 	s := &w.soldiers[index]
-	for idx in sector_polys(level, pos) {
+	for idx in polymap.sector_polys(level, pos) {
 		poly := &level.polys[idx]
 		if !soldier_collides_with(s, poly.type) do continue
 		for vert in poly.verts {
@@ -250,14 +251,14 @@ check_map_vertices_collision :: proc(ctx: ^Context, w: ^World, index: u8, pos: V
 	return false
 }
 
-soldier_collides_with :: proc(s: ^Soldier, t: Poly_Type) -> bool {
+soldier_collides_with :: proc(s: ^Soldier, t: polymap.Poly_Type) -> bool {
 	if t == .Only_Flaggers do return s.holding_flag
 	if t == .Not_Flaggers do return !s.holding_flag
-	return t != .Doesnt && t != .Only_Bullets && team_collides(t, s.team)
+	return t != .Doesnt && t != .Only_Bullets && polymap.team_collides(t, s.team)
 }
 
 // True if the poly is to be ignored as a background poly.
-bg_test :: proc(m: ^Level, bg: ^Background_State, poly: u16) -> bool {
+bg_test :: proc(m: ^polymap.Polymap, bg: ^Background_State, poly: u16) -> bool {
 	#partial switch m.polys[poly].type {
 	case .Background:
 		if bg.status == BACKGROUND_TRANSITION {
@@ -273,18 +274,18 @@ bg_test :: proc(m: ^Level, bg: ^Background_State, poly: u16) -> bool {
 	return false
 }
 
-bg_test_big_poly_center :: proc(m: ^Level, bg: ^Background_State, pos: Vec2) {
+bg_test_big_poly_center :: proc(m: ^polymap.Polymap, bg: ^Background_State, pos: Vec2) {
 	if bg.status != BACKGROUND_TRANSITION do return
 	if bg.poly == BACKGROUND_POLY_UNKNOWN {
 		bg.poly = BACKGROUND_POLY_NONE
 		for idx in m.back_polys {
-			if point_in_poly(pos, &m.polys[idx]) {
+			if polymap.point_in_poly(pos, &m.polys[idx]) {
 				bg.poly = i16(idx)
 				bg.test_result = true
 				break
 			}
 		}
-	} else if bg.poly != BACKGROUND_POLY_NONE && point_in_poly(pos, &m.polys[bg.poly]) {
+	} else if bg.poly != BACKGROUND_POLY_NONE && polymap.point_in_poly(pos, &m.polys[bg.poly]) {
 		bg.test_result = true
 	}
 }

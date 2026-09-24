@@ -3,6 +3,7 @@ package render
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
 import "../game"
+import "../../shared/polymap"
 import "../../shared/sim"
 
 // Everything drawn: the art read once (the gostek, the bullets and things), the map's
@@ -117,6 +118,6 @@ draw_soldiers :: proc(r: ^Render, g: ^game.Game, alpha: f32) {
 }
 
 // A sim colour as raylib wants it.
-color_of :: proc(c: sim.Color) -> rl.Color {
+color_of :: proc(c: polymap.Color) -> rl.Color {
 	return {c.r, c.g, c.b, c.a}
 }

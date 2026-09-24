@@ -5,7 +5,7 @@ package editor
 // The editor owns a pms.Map: the file as it really is, every field kept, down to the
 // padding bytes (../../shared/pms). Everything drawn is *derived* from it, one way:
 //
-//	bytes := pms.write(map)   ->   sim.level_load(bytes)   ->   render.Map_View
+//	bytes := pms.write(map)   ->   polymap.load(bytes)   ->   render.Map_View
 //
 // so the picture is built from exactly the bytes a save would write. A field the editor
 // loses shows up as a change on screen rather than silently on disk, and there is no
@@ -31,7 +31,7 @@ import rl "vendor:raylib"
 
 import "../render"
 import "../../shared/pms"
-import "../../shared/sim"
+import "../../shared/polymap"
 
 WHEEL_ZOOM :: 1.15
 NAME_MAX :: 64
@@ -57,7 +57,7 @@ Editor :: struct {
 	// The truth, and the picture derived from it.
 	open:   pms.Map,
 	file:   string, // what it is called on disk, owned
-	level:  sim.Level,
+	level:  polymap.Polymap,
 	view:   render.Map_View,
 	loaded: bool,
 
@@ -182,9 +182,9 @@ rebuild :: proc(e: ^Editor) -> bool {
 	defer delete(bytes)
 
 	render.map_view_unload(&e.view)
-	if e.loaded do sim.level_destroy(&e.level)
+	if e.loaded do polymap.destroy(&e.level)
 
-	level, err := sim.level_load(bytes)
+	level, err := polymap.load(bytes)
 	if err != .None do return false
 	e.level = level
 	render.map_view_load(&e.view, e.base, &e.level)
@@ -195,7 +195,7 @@ rebuild :: proc(e: ^Editor) -> bool {
 close_map :: proc(e: ^Editor) {
 	if !e.loaded do return
 	render.map_view_unload(&e.view)
-	sim.level_destroy(&e.level)
+	polymap.destroy(&e.level)
 	pms.destroy(&e.open)
 	delete(e.file)
 	e.file = ""

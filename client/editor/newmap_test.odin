@@ -8,7 +8,7 @@ package editor
 import "core:testing"
 
 import "../../shared/pms"
-import "../../shared/sim"
+import "../../shared/polymap"
 
 @(test)
 test_a_new_map_reads_back_as_itself :: proc(t: ^testing.T) {
@@ -43,10 +43,10 @@ test_the_game_will_load_a_new_map :: proc(t: ^testing.T) {
 	bytes := pms.write(&m)
 	defer delete(bytes)
 
-	level, err := sim.level_load(bytes)
-	defer sim.level_destroy(&level)
+	level, err := polymap.load(bytes)
+	defer polymap.destroy(&level)
 
-	testing.expect_value(t, err, sim.Level_Error.None)
+	testing.expect_value(t, err, polymap.Error.None)
 	testing.expect_value(t, len(level.polys), 0)
 	testing.expectf(t, level.sectors_division > 0, "the sector grid did not survive")
 }

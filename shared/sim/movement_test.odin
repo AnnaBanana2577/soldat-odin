@@ -2,6 +2,7 @@ package sim
 
 import "core:fmt"
 import "core:testing"
+import "../polymap"
 
 // The rolls and the backflip, against OpenSoldat Control.pas: which way a crouch while
 // running throws the body, what the two animation machines do while it turns, what the
@@ -10,7 +11,7 @@ import "core:testing"
 
 @(private = "file")
 Fixture :: struct {
-	level:  Level,
+	level:  polymap.Polymap,
 	anims:  ^Anims,
 	skels:  ^Skeletons,
 	ctx:    Context,
@@ -24,7 +25,7 @@ Fixture :: struct {
 @(private = "file")
 fixture :: proc(aim_x: f32) -> (f: ^Fixture, ok: bool) {
 	f = new(Fixture)
-	f.level = level_load_file("assets", "Arena") or_return
+	f.level = polymap.load_file("assets", "Arena") or_return
 	f.anims = anims_load_files("assets") or_return
 	f.skels = skeletons_load_files("assets") or_return
 	f.ctx = {level = &f.level, anims = f.anims, skeletons = f.skels}
@@ -34,7 +35,7 @@ fixture :: proc(aim_x: f32) -> (f: ^Fixture, ok: bool) {
 	f.world.authority = true
 	round_init(&f.world.round)
 	s := &f.world.soldiers[0]
-	soldier_spawn(&f.ctx, s, level_spawn_point(&f.level, .Alpha, &f.world.rng), .Alpha, .AK74, .Colt)
+	soldier_spawn(&f.ctx, s, spawn_point(&f.level, .Alpha, &f.world.rng), .Alpha, .AK74, .Colt)
 	s.cease_fire_counter = -1
 	f.aim = {aim_x, 0}
 	hold(f, {}, 120) // land and come to rest
@@ -46,7 +47,7 @@ fixture_destroy :: proc(f: ^Fixture) {
 	free(f.world)
 	free(f.anims)
 	free(f.skels)
-	level_destroy(&f.level)
+	polymap.destroy(&f.level)
 	free(f)
 }
 

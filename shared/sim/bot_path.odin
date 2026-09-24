@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // ControlBot (AI.pas): one tick of a bot. It looks for someone to shoot at, and
 // failing that walks the waypoints the map author laid; then it looks for a flag or a
@@ -34,8 +35,8 @@ bot_walk :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 		dead := o.dead
 		if dead && !(b.prof.shoot_dead && o.respawn_counter > w.round.respawn_time - DEAD_INTEREST) do continue
 		start := bot_head(ctx, w, u8(i))
-		if _, inside := collision_test(level, start); inside do start.y += 6 // a head in the ground
-		d, blocked := ray_cast(level, look, start, BOT_SIGHT)
+		if _, inside := polymap.collision_test(level, start); inside do start.y += 6 // a head in the ground
+		d, blocked := polymap.ray_cast(level, look, start, BOT_SIGHT)
 		if blocked || d >= nearest do continue
 		b.target = u8(i)
 		see = true
@@ -58,7 +59,7 @@ bot_walk :: proc(bots: ^Bots, ctx: ^Context, w: ^World, slot: u8) {
 		b.pissed_off = NOBODY
 	}
 	if b.pissed_off != NOBODY {
-		if _, blocked := ray_cast(level, look, bot_head(ctx, w, b.pissed_off), BOT_SIGHT); !blocked {
+		if _, blocked := polymap.ray_cast(level, look, bot_head(ctx, w, b.pissed_off), BOT_SIGHT); !blocked {
 			b.target = b.pissed_off
 			see = true
 		} else {
@@ -236,7 +237,7 @@ bot_seek_thing :: proc(b: ^Bot, ctx: ^Context, w: ^World, slot: u8, held: ^Thing
 		case .Weapon:       wanted = t.weapon == .Knife // a thrown knife to take up again
 		}
 		if !wanted do continue
-		d, blocked := ray_cast(ctx.level, look, t.pos[1] - {0, 5}, BOT_SIGHT)
+		d, blocked := polymap.ray_cast(ctx.level, look, t.pos[1] - {0, 5}, BOT_SIGHT)
 		if blocked || d >= DIST_FAR do continue
 
 		seen = true
@@ -291,7 +292,7 @@ bot_flag_at_home :: proc(w: ^World, team: Team) -> bool {
 
 // The first waypoint within `radius` of a point that is not the one it is on, 0 for
 // none (TWaypoints.FindClosest, which takes the first it finds and not the closest).
-bot_closest_waypoint :: proc(m: ^Level, pos: Vec2, radius: f32, current: int) -> int {
+bot_closest_waypoint :: proc(m: ^polymap.Polymap, pos: Vec2, radius: f32, current: int) -> int {
 	for p, i in m.waypoints {
 		if i == current || !p.active do continue
 		if geom.vec2_length(pos - p.pos) < radius do return i
@@ -299,8 +300,8 @@ bot_closest_waypoint :: proc(m: ^Level, pos: Vec2, radius: f32, current: int) ->
 	return 0
 }
 
-// Waypoint number `i`, or a blank one when there is none.
-bot_waypoint :: proc(m: ^Level, i: int) -> Waypoint {
+// polymap.Waypoint number `i`, or a blank one when there is none.
+bot_waypoint :: proc(m: ^polymap.Polymap, i: int) -> polymap.Waypoint {
 	if i > 0 && i < len(m.waypoints) do return m.waypoints[i]
 	return {}
 }

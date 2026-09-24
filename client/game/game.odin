@@ -5,6 +5,7 @@ import "core:strings"
 import "../connection"
 import "../input"
 import "../../shared/net"
+import "../../shared/polymap"
 import "../../shared/sim"
 
 // The game as this client plays it. My soldier is stepped here the moment I press a
@@ -30,7 +31,7 @@ import "../../shared/sim"
 Game :: struct {
 	ctx:       sim.Context,
 	base:      string,
-	level:     sim.Level,
+	level:     polymap.Polymap,
 	map_name:  string, // the loaded map's
 	maps_loaded: int,  // how many maps were loaded: what the picture is rebuilt by
 	missing:   string, // a map the server named and that is not here
@@ -103,7 +104,7 @@ init :: proc(g: ^Game, base: string, me: u8, interp_least: int, clock_target: f3
 }
 
 destroy :: proc(g: ^Game) {
-	if g.maps_loaded > 0 do sim.level_destroy(&g.level)
+	if g.maps_loaded > 0 do polymap.destroy(&g.level)
 	delete(g.map_name)
 	delete(g.missing)
 	free(g.anims)
@@ -162,12 +163,12 @@ receive :: proc(g: ^Game, conn: ^connection.Connection) {
 // facts that follow it, and an update from before it speaks of the last round.
 receive_map :: proc(g: ^Game, m: ^net.Map) {
 	if m.name != g.map_name {
-		level, ok := sim.level_load_file(g.base, m.name)
+		level, ok := polymap.load_file(g.base, m.name)
 		if !ok {
 			g.missing = strings.clone(m.name)
 			return
 		}
-		if g.maps_loaded > 0 do sim.level_destroy(&g.level)
+		if g.maps_loaded > 0 do polymap.destroy(&g.level)
 		g.level = level
 		delete(g.map_name)
 		g.map_name = strings.clone(m.name)

@@ -5,6 +5,7 @@ import "core:time"
 import enet "vendor:ENet"
 import "../shared/net"
 import "../shared/geom"
+import "../shared/polymap"
 import "../shared/sim"
 
 // The server's world is the one that decides (world.authority): it runs every soldier,
@@ -31,7 +32,7 @@ import "../shared/sim"
 // so the bullet each of them sees is the one that will be ruled on.
 Game :: struct {
 	ctx:        sim.Context,
-	level:      sim.Level,
+	level:      polymap.Polymap,
 	anims:      ^sim.Anims,
 	skeletons:  ^sim.Skeletons,
 	world:      sim.World,
@@ -145,9 +146,9 @@ next_round :: proc(g: ^Game, host: ^Host) {
 }
 
 map_load :: proc(g: ^Game, name: string) -> bool {
-	level, ok := sim.level_load_file(g.base, name)
+	level, ok := polymap.load_file(g.base, name)
 	if !ok do return false
-	if g.map_name != "" do sim.level_destroy(&g.level)
+	if g.map_name != "" do polymap.destroy(&g.level)
 	g.level, g.map_name = level, name
 	return true
 }

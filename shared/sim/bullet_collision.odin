@@ -1,6 +1,7 @@
 package sim
 
 import "../geom"
+import "../polymap"
 
 // A bullet's tick of collisions, in the original's order: the map, the colliders,
 // the soldiers, the things. A bullet stopped by one is rewound so the later checks
@@ -49,12 +50,12 @@ bullet_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, events:
 }
 
 @(private = "file")
-bullet_poly_collides :: proc(t: Poly_Type, team: Team) -> bool {
+bullet_poly_collides :: proc(t: polymap.Poly_Type, team: Team) -> bool {
 	#partial switch t {
 	case .Only_Player, .Doesnt, .Only_Flaggers, .Not_Flaggers, .Background, .Background_Transition:
 		return false
 	}
-	return bullet_team_collides(t, team)
+	return polymap.bullet_team_collides(t, team)
 }
 
 // Steps along the velocity looking for a solid poly. Returns the contact point.
@@ -75,9 +76,9 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 			bullet_end(w, b, index, events)
 			return {}
 		}
-		for idx in sector_at(level, sx, sy) {
+		for idx in polymap.sector_at(level, sx, sy) {
 			poly := &level.polys[idx]
-			if !bullet_poly_collides(poly.type, team) || !point_in_poly_edges(pos, poly) do continue
+			if !bullet_poly_collides(poly.type, team) || !polymap.point_in_poly_edges(pos, poly) do continue
 
 			#partial switch b.style {
 			case .Plain, .Shotgun, .Punch, .Knife, .M2:
@@ -99,7 +100,7 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 				if b.timeout < 20 do b.forces.y += w.gravity * BULLET_GRAVITY
 			case .Frag_Grenade, .Flame:
 				if b.style == .Frag_Grenade && geom.vec2_length(b.vel) > 1.5 do emit(events, Grenade_Bounce{id = index, owner = b.owner, pos = pos})
-				normal, dist, _ := closest_perpendicular(poly, b.pos)
+				normal, dist, _ := polymap.closest_perpendicular(poly, b.pos)
 				b.pos = pos
 				b.vel = (b.vel - geom.vec2_normalize(normal) * dist) * GRENADE_SURFACECOEF
 				if b.style == .Flame do b.timeout = min(b.timeout, 16)
@@ -124,7 +125,7 @@ map_collide :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, at: Vec2, 
 
 // A glancing hit deflects; anything else stops the bullet. True if it survived.
 @(private = "file")
-ricochet :: proc(level: ^Level, w: ^World, b: ^Bullet, index: u16, poly: ^Polygon, pos: Vec2, team: Team, events: ^Events) -> bool {
+ricochet :: proc(level: ^polymap.Polymap, w: ^World, b: ^Bullet, index: u16, poly: ^polymap.Polygon, pos: Vec2, team: Team, events: ^Events) -> bool {
 	b.old_pos = b.pos
 	b.pos = pos - b.vel
 	// one ricochet per surface contact
@@ -133,7 +134,7 @@ ricochet :: proc(level: ^Level, w: ^World, b: ^Bullet, index: u16, poly: ^Polygo
 		return false
 	}
 	b.ricochet_count += 1
-	normal, _, _ := closest_perpendicular(poly, b.pos)
+	normal, _, _ := polymap.closest_perpendicular(poly, b.pos)
 	speed := geom.vec2_length(b.vel)
 	reflect := geom.vec2_normalize(normal) * -speed
 	b.vel = b.vel * (25.0 / 35) + reflect * (10.0 / 35)
@@ -142,9 +143,9 @@ ricochet :: proc(level: ^Level, w: ^World, b: ^Bullet, index: u16, poly: ^Polygo
 	b.old_pos = pos
 	// dead if the deflected path is still inside geometry
 	probe := pos + geom.vec2_normalize(b.vel) * (speed / 6)
-	for idx in sector_polys(level, probe) {
+	for idx in polymap.sector_polys(level, probe) {
 		p := &level.polys[idx]
-		if bullet_poly_collides(p.type, team) && point_in_poly_edges(probe, p) {
+		if bullet_poly_collides(p.type, team) && polymap.point_in_poly_edges(probe, p) {
 			bullet_end(w, b, index, events, pos)
 			return false
 		}

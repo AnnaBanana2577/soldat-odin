@@ -77,8 +77,10 @@ shared/                 the layer both executables import, a DAG of packages, li
                         bottom up: nothing imports anything above itself
   geom/     Vec2, the vector arithmetic, point_line_distance, line_circle_collision,
             round_half_even: what knows no type but Vec2 (from sim/math and sim/level)
-  level/    Level: the map as the game reads it. level (the types, load, destroy),
-            file (the byte reader), query (sectors, ray casts, the polygon tests)
+  polymap/  Polymap: the map as the game reads it, and Team as the map knows it.
+            polymap (the types, destroy), file (a .pms read from disk, the fields
+            taken out of it, load), query (sectors, ray casts, the polygon tests,
+            which polygons a team passes)
   anim/     the .poa animations and the .po particle objects: Anims, Anim (one
             running), Pose, Particle_Object, their parsers and loaders (anim, pose, file)
   weapons/  Weapon_Id, Bullet_Style, Weapon_Info, the table and its defaults, named
@@ -86,14 +88,13 @@ shared/                 the layer both executables import, a DAG of packages, li
             the static data the world reads: anims, weapons, skeletons)
     world/  World: world.odin (World: the map, the pools, tick, rng, authority, the
             flag homes; init, step: a View built, every soldier stepped on its command,
-            then the ragdolls, the things, the bullets), spawn (where a team is placed,
-            which polygons a team passes: the rules over the map that were the
-            level's)
+            then the ragdolls, the things, the bullets), spawn (where a team is placed:
+            the one pick over the map that rolls the sim's rng)
       entities/  the knot: view (View: what an entity may reach), soldier (movement,
               soldier_anim, combat, antics, soldier_collision, soldier_pose), bullet
               (bullet_collision, explosion), damage, thing (the pool and its physics:
               flag, kit, dropped_gun, parachute, stat_gun), ragdoll, event, history,
-              command (Command, Buttons, Team), rand
+              command (Command, Buttons; Team is the map's), rand
     match/  Match: match.odin (Match: settings, time_remaining, score, mode, state;
             run: the clock, the end, who respawns when), score (Match_Score),
             settings (Match_Settings: time and score limits, respawn time, grenades,
@@ -187,12 +188,13 @@ commit, in this order, because each depends on the one before.
    with the level. The rng stays in the sim (rand.odin): it is the sim's determinism,
    not arithmetic. `Vec2 :: geom.Vec2` in the sim keeps `sim.Vec2` for everyone
    above; this one alias stays, because everything above the world speaks in its terms.
-2. **level.** sim/level.odin and level_file.odin become shared/level, and the one file
-   becomes three: level (the types, load, destroy), file (the byte reader), query
-   (sectors, ray casts, the collision tests). Two things move up into the sim instead
-   of across: `level_spawn_point` (it takes a Team and rolls the rng) and
-   `team_collides` / `bullet_team_collides` (which polygons a team passes is a rule of
-   the game, not a fact of the map). The Level keeps its spawnpoints; the sim picks.
+2. **polymap.** sim/level.odin and level_file.odin become shared/polymap, and the one
+   file becomes three: polymap (the types, destroy), file (the disk read, the byte
+   reader, load), query (sectors, ray casts, the polygon tests). Team moves down into
+   it, because the map's own polygons and spawns are a team's: the sim's Team is an
+   alias of the map's, so the wire and the client see no change. One thing moves up
+   into the sim instead of across: the spawn pick (sim/spawn.odin), which rolls the
+   sim's rng. The map keeps its spawnpoints; the sim picks.
 3. **weapons.** sim/weapons.odin becomes shared/weapons: the ids, the styles, the
    table, its defaults and `named`. The Weapon a soldier holds (ammo, the reload
    clocks) is state and stays with the soldier, in combat.odin.
@@ -201,9 +203,8 @@ commit, in this order, because each depends on the one before.
    and anim_file.odin's loaders become shared/anim. `soldier_pose` stays in the sim, in
    its own file; so do Skeletons and their loader, which are the things'.
 5. **entities, and world over them.** shared/sim becomes shared/game/world/entities:
-   the package renamed, Command, Buttons and Team into command.odin, math.odin's rng
-   into rand.odin. World, world_init and step leave for shared/game/world/world.odin,
-   with level_spawn_point and the team collision tests beside them in spawn.odin.
+   the package renamed, Command and Buttons into command.odin. World, world_init and
+   step leave for shared/game/world/world.odin, with spawn.odin beside them.
    entities/view.odin is the View, and every entity procedure that took `w: ^World`
    takes `v: ^View`: the pools index the same through the pointer, `&w.rng` becomes
    `v.rng`, and `w.round` goes (next step). round.odin and Match_State come out with it;
