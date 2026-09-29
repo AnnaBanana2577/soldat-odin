@@ -114,7 +114,8 @@ client joined to it, as config.cfg says (`launcher -sv_bots 4` for bots), or wit
 `soldat-server-windows` and `soldat-server-linux` hold the server and the assets; run it
 from its own folder. Each carries what a machine cannot be counted on to have: the
 Visual C++ runtime on Windows, and ENet in `lib/` on Linux, which asks the system only
-for X11, OpenGL and a glibc as new as Ubuntu 22.04's.
+for X11, OpenGL and a glibc as new as Ubuntu 24.04's (2.39), which the raylib Odin
+ships needs.
 
 ## Tooling
 

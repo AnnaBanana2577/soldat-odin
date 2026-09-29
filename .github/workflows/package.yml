@@ -22,9 +22,10 @@ jobs:
         include:
           - platform: windows
             runner: windows-2022
-          # the oldest supported: the packages run on its glibc (2.35) and anything newer
+          # the packages run on its glibc (2.39) and anything newer. Older will not do: the raylib
+          # Odin ships is built against glibc 2.38 (its __isoc23_ symbols)
           - platform: linux
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
