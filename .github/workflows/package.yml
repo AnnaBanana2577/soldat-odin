@@ -73,6 +73,14 @@ jobs:
             ldd "$dir/server" | grep -F "$PWD/$dir/lib/libenet"
           done
 
+      # from another folder, as a player's double-click would: the launcher finds its own,
+      # starts the server with a bot, and a headless client plays against it
+      - name: Play a few seconds from the client package
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/dist/soldat-client-${{ matrix.platform }}/launcher" -sv_bots 1 -cl_headless -dbg_seconds 3 | tee play.log
+          grep -F 'prediction:' play.log
+
       - uses: actions/upload-artifact@v7
         with:
           name: soldat-${{ matrix.platform }}
