@@ -108,6 +108,7 @@ build_all :: proc(opts: Options) -> int {
 
 
 run_tests :: proc(opts: Options) -> int {
+	if !ensure_build_dir() do return 1 // where the test binaries go: not there in a fresh checkout
 	for lib in LIBRARIES {
 		fmt.printfln("testing %s", lib)
 		if code := run(argv({"odin", "test", lib, fmt.tprintf("-out:%s", exe("test"))}, flags(opts))); code != 0 do return code
