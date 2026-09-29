@@ -277,9 +277,9 @@ failed :: proc(format: string, args: ..any) -> int {
 DEBUG_FLAGS   := [?]string{"-debug", "-vet-unused", "-vet-shadowing"}
 when ODIN_OS == .Linux {
 	// A release build looks for its libraries in lib/ beside it before the system's: that is
-	// where a package carries ENet (package_all). The backslash is for the shell Odin links
-	// through, which would otherwise read $ORIGIN as a variable.
-	RELEASE_FLAGS := [?]string{"-o:speed", "-vet-unused", "-vet-shadowing", `-extra-linker-flags:-Wl,-rpath,\$ORIGIN/lib`}
+	// where a package carries ENet (package_all). Odin hands it to the linker as it is, with no
+	// shell between to read $ORIGIN as a variable.
+	RELEASE_FLAGS := [?]string{"-o:speed", "-vet-unused", "-vet-shadowing", `-extra-linker-flags:-Wl,-rpath,$ORIGIN/lib`}
 } else {
 	RELEASE_FLAGS := [?]string{"-o:speed", "-vet-unused", "-vet-shadowing"}
 }
