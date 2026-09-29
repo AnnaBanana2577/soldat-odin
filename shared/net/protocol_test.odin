@@ -13,7 +13,8 @@ update_round_trip :: proc(t: ^testing.T) {
 	defer free(back)
 
 	u := Update{tick = 1234, ack = 99, depth = 3, active = 0b101}
-	u.lags[0], u.lags[2] = 7, 9
+	u.lag, u.has_pings = 7, true
+	u.pings[0], u.pings[2] = 120, 300
 	u.round.time_left = 99
 	u.round.scores[.Bravo] = 3
 	e := &u.entries[0]
@@ -42,7 +43,7 @@ update_round_trip :: proc(t: ^testing.T) {
 
 	got := back.(Update)
 	s := &got.entries[0].soldier
-	testing.expect(t, got.lags[0] == 7 && got.lags[2] == 9)
+	testing.expect(t, got.lag == 7 && got.has_pings && got.pings[0] == 120 && got.pings[2] == 300)
 	testing.expect(t, got.ack == 99 && got.depth == 3)
 	testing.expect(t, got.tick == 1234 && got.active == 0b101 && got.entry_count == 1 && got.fired_count == 1)
 	testing.expect(t, s.life == 3 && s.team == .Bravo && s.health == 61.5 && s.pos == {10.5, -3})

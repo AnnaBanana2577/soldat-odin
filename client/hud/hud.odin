@@ -211,7 +211,7 @@ draw :: proc(h: ^Hud, g: ^game.Game, r: ^render.Render, camera: ^render.Camera, 
 	minimap_draw(h, g, sc, r, camera)
 	if !scores {
 		feed_draw(h, g, sc)
-		text(h, sc, .Small, fmt.tprintf("%d ms", g.my_lag * 1000 / sim.TICK_RATE), spread(sc, 600), 18, {200, 200, 200, 200})
+		text(h, sc, .Small, fmt.tprintf("%d ms", g.my_ping), spread(sc, 600), 18, {200, 200, 200, 200})
 	}
 	chat_draw(h, g, sc, camera, alpha)
 	if h.menu.open do menu_draw(h, g, sc)

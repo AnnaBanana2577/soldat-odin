@@ -77,7 +77,7 @@ scoreboard_draw :: proc(h: ^Hud, g: ^game.Game, sc: Screen) {
 			text(h, sc, .Small, fmt.tprint(s.kills), x + 284, py, shirt)
 			if s.flags > 0 do text(h, sc, .Small, fmt.tprintf("x%d", s.flags), x + 348, py, shirt)
 			text(h, sc, .Small, fmt.tprint(s.deaths), x + 394, py, shirt)
-			if g.bots & (1 << u32(i)) == 0 do text(h, sc, .Small, fmt.tprint(int(g.lags[i]) * 1000 / sim.TICK_RATE), x + 534, py, shirt)
+			if g.bots & (1 << u32(i)) == 0 do text(h, sc, .Small, fmt.tprint(g.pings[i]), x + 534, py, shirt)
 			total += int(s.kills)
 			index += 1
 		}
