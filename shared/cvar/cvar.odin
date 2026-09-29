@@ -1,6 +1,6 @@
 // Package cvar is where a setting lives: a name, a value, a default and a line of help.
-// Each program declares its own at startup (sv_ on the server, cl_, net_, r_, snd_ and
-// ui_ on the client), and they are set from two places, the file first and the command
+// Each program declares its own at startup (sv_ on the server, cl_, net_, r_, snd_, ui_ and
+// bind_ on the client), and they are set from two places, the file first and the command
 // line over it:
 //
 //   config.cfg   one setting a line, "name value"; # or // starts a comment

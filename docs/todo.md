@@ -24,7 +24,8 @@ x Roll/flip parity with opensoldat
   Missing outright:
     7. Weapon stats page (F2)
     8. Radio menu (V)
-    9. Key binds in settings, with the original's as defaults
+    9. Key binds: in config.cfg now (the bind_ settings), but the defaults are still this
+       port's, not the original's
     10. Spectators — team menu, scoreboard section, free camera, server support
     11. Interface read from the interface-gfx archive and its .ini rather than fixed in code
 - Chat/commands

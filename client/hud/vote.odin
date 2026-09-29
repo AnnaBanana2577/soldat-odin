@@ -2,8 +2,8 @@
 package hud
 
 import "core:fmt"
-import rl "vendor:raylib"
 import "../game"
+import "../input"
 import "../../shared/net"
 import "../../shared/sim"
 
@@ -17,11 +17,11 @@ VOTE_X, VOTE_Y :: f32(45), f32(400)
 // This frame's keys for a vote. Returns whether they were taken.
 vote_input :: proc(h: ^Hud, g: ^game.Game) -> (keys_taken: bool) {
 	if !g.vote.active do return false
-	if rl.IsKeyPressed(.F12) {
+	if input.keys_pressed(h.keys[.Vote_Yes]) {
 		game.vote_yes(g)
 		return true
 	}
-	if rl.IsKeyPressed(.F11) {
+	if input.keys_pressed(h.keys[.Vote_No]) {
 		game.vote_no(g)
 		return true
 	}
