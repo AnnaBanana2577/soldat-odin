@@ -36,7 +36,7 @@ package net
 
 import "../sim"
 
-VERSION      :: 12
+VERSION      :: 13
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
@@ -66,6 +66,7 @@ MAX_FACTS_PER_MSG    :: 16
 Hello :: struct {
 	version: u16,
 	name:    string,
+	line_ms: u16, // the round trip a simulated bad line adds on this client (net_ping, net_jitter): the server cannot see it
 }
 
 Welcome :: struct {
@@ -223,8 +224,10 @@ End :: struct {
 
 // The world at `tick`. `active` has a bit for every slot in play; a soldier in play
 // but not among the entries is out of the receiver's view, and heard of now and then.
-// `lags` has for every slot in play how late the server finds its player sees the world,
-// in ticks: the receiver's own tells it its lag, the rest are the scoreboard's pings.
+// `lag` is how late the server finds the receiver sees the world, in ticks: what its
+// bullets are flown on by. Once a second (`has_pings`) `pings` has every player's round
+// trip in ms, the line's as the server measures it and a simulated one's as its client
+// said: the scoreboard's.
 // `ack` is the receiver's last command the server has run, and `depth` how many of its
 // commands were waiting: what it replays from, and what it steers its clock by.
 Update :: struct {
@@ -233,7 +236,9 @@ Update :: struct {
 	depth:       u8,
 	round:       sim.Round, // state, time left, the two scores
 	active:      u32,
-	lags:        [sim.MAX_PLAYERS]u8,
+	lag:         u8,
+	has_pings:   bool,
+	pings:       [sim.MAX_PLAYERS]u16,
 	entries:     [sim.MAX_PLAYERS]Entry,
 	entry_count: int,
 	fired:       [MAX_SHOTS_PER_UPDATE]Fired,
@@ -480,6 +485,7 @@ ser_fact :: proc(s: ^Stream, e: ^sim.Event) {
 ser_hello :: proc(s: ^Stream, m: ^Hello) {
 	ser_u16(s, &m.version)
 	ser_string(s, &m.name)
+	ser_u16(s, &m.line_ms)
 }
 
 ser_welcome :: proc(s: ^Stream, m: ^Welcome) {
@@ -579,7 +585,9 @@ ser_update :: proc(s: ^Stream, m: ^Update) {
 	ser_as(s, &m.round.scores[.Alpha], u16)
 	ser_as(s, &m.round.scores[.Bravo], u16)
 	ser_u32(s, &m.active)
-	for i in 0 ..< sim.MAX_PLAYERS do if m.active & (1 << u32(i)) != 0 do ser_u8(s, &m.lags[i])
+	ser_u8(s, &m.lag)
+	ser_bool(s, &m.has_pings)
+	if m.has_pings do for i in 0 ..< sim.MAX_PLAYERS do if m.active & (1 << u32(i)) != 0 do ser_u16(s, &m.pings[i])
 	ser_count(s, &m.entry_count, sim.MAX_PLAYERS)
 	for i in 0 ..< m.entry_count {
 		e := &m.entries[i]

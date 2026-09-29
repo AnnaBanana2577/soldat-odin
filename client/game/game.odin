@@ -41,7 +41,8 @@ Game :: struct {
 	view:      View,       // the others
 	names:     [sim.MAX_PLAYERS]net.Name, // who plays in which slot, from the server's roster
 	bots:      u32, // a bit for each slot the server plays itself
-	lags:      [sim.MAX_PLAYERS]u8, // how late the server finds each player sees the world, in ticks
+	pings:     [sim.MAX_PLAYERS]u16, // each player's round trip in ms, as the server last said: the scoreboard's
+	my_ping:   int, // my own round trip in ms, measured here: the line's and the simulated line's
 	events:    sim.Events, // this tick's, for the sparks and the sounds
 	heard:     [dynamic]net.Chat, // this tick's lines, for the HUD
 	vote:      net.Vote_State, // what is being voted on, from the server; its clock runs here
@@ -123,6 +124,7 @@ tick :: proc(g: ^Game, conn: ^connection.Connection, in_: ^input.Input) {
 	view_advance(&g.view, &g.ctx, &g.world, g.me)
 	if g.vote.active && g.vote.ticks > 0 do g.vote.ticks -= 1 // the server says when it is over
 	receive(g, conn)
+	g.my_ping = connection.ping(conn)
 	step_mine(g, in_)
 	step_world(g)
 	predict_tick(g)
@@ -186,8 +188,8 @@ receive_map :: proc(g: ^Game, m: ^net.Map) {
 receive_update :: proc(g: ^Game, m: ^net.Update) {
 	if m.tick <= g.newest do return
 	g.newest = m.tick
-	g.lags = m.lags
-	g.my_lag = int(m.lags[g.me])
+	g.my_lag = int(m.lag)
+	if m.has_pings do g.pings = m.pings
 	g.server_depth = m.depth
 	g.world.round.state = m.round.state
 	g.world.round.time_left = m.round.time_left

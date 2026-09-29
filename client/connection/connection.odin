@@ -16,12 +16,14 @@ Connection :: struct {
 	inbox:    [dynamic][]u8, // copies of received packets, owned here until drained
 	fake:     net.Fake_Link,
 	lost:     bool, // the server went away
+	line_ms:  u16,  // the round trip the simulated line adds, which ENet does not see
 }
 
 CONNECT_TIMEOUT :: 4 * time.Second
 
 // Connects and completes the handshake before returning: hello up, welcome down.
-open :: proc(c: ^Connection, address: string, port: u16, name: string) -> bool {
+open :: proc(c: ^Connection, address: string, port: u16, name: string, line_ms: u16 = 0) -> bool {
+	c.line_ms = line_ms
 	if enet.initialize() != 0 do return false
 	c.host = enet.host_create(nil, 1, net.CHANNEL_COUNT, 0, 0)
 	if c.host == nil do return false
@@ -40,7 +42,7 @@ open :: proc(c: ^Connection, address: string, port: u16, name: string) -> bool {
 			// ENet's throttle off for our side too, as the server does for its side
 			enet.peer_throttle_configure(c.peer, enet.PEER_PACKET_THROTTLE_INTERVAL, 0, 0)
 			c.peer.packetThrottle = enet.PEER_PACKET_THROTTLE_SCALE
-			send_message(c, net.Hello{version = net.VERSION, name = name})
+			send_message(c, net.Hello{version = net.VERSION, name = name, line_ms = line_ms})
 		case .RECEIVE:
 			reply: net.Message
 			decoded := net.decode(event.packet.data[:event.packet.dataLength], &reply)
@@ -142,4 +144,11 @@ send_now :: proc(c: ^Connection, data: []u8, reliable: bool) {
 	flags := enet.PacketFlags{.RELIABLE} if reliable else enet.PacketFlags{.UNRELIABLE_FRAGMENT}
 	packet := enet.packet_create(raw_data(data), len(data), flags)
 	enet.peer_send(c.peer, reliable ? net.CHANNEL_RELIABLE : net.CHANNEL_UNRELIABLE, packet)
+}
+
+// My round trip in ms: ENet's measure of the line, and what the simulated line adds on
+// top, which ENet never sees because the packets wait outside it.
+ping :: proc(c: ^Connection) -> int {
+	if c.peer == nil do return 0
+	return int(c.peer.roundTripTime) + int(c.line_ms)
 }

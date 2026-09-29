@@ -77,6 +77,7 @@ Client :: struct {
 	bot:        bool, // played by the server itself (sim/bot.odin): no peer, nothing received or sent
 	queue:      Queue, // what it pressed, and what of that the sim has yet to run
 	lag:        f32,   // how late it sees the world, in ticks, smoothed: told back to it
+	line_ms:    u16,   // the round trip its simulated line adds, as it said on joining
 	// for the leave line: the hits it gave and took as ruled here, which its own summary
 	// has as it saw them; `judged` sums how far back its shots were ruled
 	shots, hits_given, hits_taken, judged: int,
@@ -339,7 +340,7 @@ join :: proc(g: ^Game, host: ^Host, peer: ^enet.Peer, m: net.Hello) {
 		return
 	}
 	host_bind(host, slot, peer)
-	g.clients[slot] = {connected = true, name = net.name_make(m.name)}
+	g.clients[slot] = {connected = true, name = net.name_make(m.name), line_ms = m.line_ms}
 	bot_friends(g) // one of them may have named this player as its friend
 	g.outgoing = net.Welcome{slot = slot}
 	send_message(g, host, slot)
@@ -555,11 +556,16 @@ send_facts :: proc(g: ^Game, host: ^Host) {
 send_updates :: proc(g: ^Game, host: ^Host) {
 	w := &g.world
 	active: u32
-	lags: [sim.MAX_PLAYERS]u8
 	for &s, i in w.soldiers {
 		if !s.active do continue
 		active |= 1 << u32(i)
-		lags[i] = u8(min(g.clients[i].lag + 0.5, 255))
+	}
+	// once a second, everyone's round trip for the scoreboard: ENet's measure of each line, and
+	// what a simulated one adds, which only its client knows
+	has_pings := w.tick % sim.TICK_RATE == 0
+	pings: [sim.MAX_PLAYERS]u16
+	if has_pings do for &c, i in g.clients {
+		if c.connected && !c.bot && host.peers[i] != nil do pings[i] = u16(min(host.peers[i].roundTripTime + u32(c.line_ms), 65535))
 	}
 	every := g.rules.update_others // a client hears of its own every tick: what it replays from
 	turn := w.tick / every
@@ -568,7 +574,7 @@ send_updates :: proc(g: ^Game, host: ^Host) {
 		if !c.connected || c.bot do continue
 		me := &w.soldiers[ri]
 		watching := me.active && !me.dead // from somewhere: a client without a soldier sees it all
-		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, round = w.round, active = active, lags = lags}
+		g.outgoing = net.Update{tick = w.tick, ack = c.queue.last_seq, depth = c.queue.depth, round = w.round, active = active, lag = u8(min(c.lag + 0.5, 255)), has_pings = has_pings, pings = pings}
 		m := &g.outgoing.(net.Update)
 		for &s, i in w.soldiers {
 			if !s.active do continue

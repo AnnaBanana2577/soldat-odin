@@ -158,7 +158,7 @@ run_headless :: proc() {
 // The server, and the simulated bad line if one was asked for.
 open_connection :: proc() {
 	o := &app.settings
-	if !connection.open(&app.conn, o.join, u16(o.port), o.name) do fail("could not reach %s", o.join)
+	if !connection.open(&app.conn, o.join, u16(o.port), o.name, u16(o.ping + o.jitter)) do fail("could not reach %s", o.join)
 	connection.simulate_line(&app.conn, f64(o.ping), f64(o.jitter), f64(o.loss))
 }
 
