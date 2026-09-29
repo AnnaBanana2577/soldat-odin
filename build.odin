@@ -22,7 +22,8 @@ import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 
-BUILD_DIR :: "build"
+// Not build/: on Linux, odin run build.odin leaves this tool itself as ./build.
+BUILD_DIR :: "bin"
 DIST_DIR :: "dist"
 ASSETS_DIR :: "assets"
 

@@ -54,7 +54,7 @@ One entry point, build.odin, in Odin so it works the same everywhere:
 
 ```
 odin run build.odin -file -- check          type-check every package (with the vet flags)
-odin run build.odin -file -- build          compile the client and the server into build/
+odin run build.odin -file -- build          compile the client, the server and the launcher into bin/
 odin run build.odin -file -- test           run the package tests
 odin run build.odin -file -- dev            build, then a server with a client joined
 odin run build.odin -file -- dev -sv_bots 2 the same with two bots in it
