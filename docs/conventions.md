@@ -67,6 +67,8 @@ The wire decides the rest. A Hello carries the layout of the state and a build t
 does not match is refused, so any release that changes the protocol will not talk to
 the one before it. Say so in the tag's message, every time.
 
-A tag is the version; what ships beside it is the client, the server and the contents
-of `assets/`, unpacked flat so that config.cfg and the art sit beside the executable
-(see the readme). The tag alone is not a release until that exists.
+A tag is the version; what ships beside it is the packages .github/workflows/package.yml
+builds: for Windows and Linux, the client with the server and a launcher, and the server
+alone, each with the contents of `assets/` unpacked flat so that config.cfg and the art
+sit beside the executable (see the readme). Pushing the tag builds them and makes the
+release with them on it; the tag's message is its notes.

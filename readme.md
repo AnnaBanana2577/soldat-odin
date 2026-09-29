@@ -60,6 +60,7 @@ odin run build.odin -file -- dev            build, then a server with a client j
 odin run build.odin -file -- dev -sv_bots 2 the same with two bots in it
 odin run build.odin -file -- server         build, then the server alone
 odin run build.odin -file -- editor         build, then the map editor, no server
+odin run build.odin -file -- package        release builds, and the packages a player downloads, in dist/
 ```
 
 The editor opens on the maps in assets/; `-- -cl_map ctf_Ash` opens one straight away.
@@ -103,6 +104,17 @@ scoreboard and F3 the minimap. Tab opens and closes the weapons menu; in it a cl
 everyone and Y to your team; Enter sends it, Esc lets it go. Esc opens the game's menu:
 1 leaves, 2 and 3 open the windows for voting in a map or voting a player out, 4 picks
 a team. While a vote is running, F12 agrees with it and F11 has none of it.
+
+**The packages.** `package` makes what a player downloads, and GitHub makes the same on
+every push (a run's artifacts, on the Actions tab) and puts them on the release a
+version tag makes. `soldat-client-windows` and `soldat-client-linux` hold the client,
+the server, a launcher and the assets. The launcher starts a server of your own with the
+client joined to it, as config.cfg says (`launcher -sv_bots 4` for bots), or with
+`-cl_join ADDRESS -cl_port PORT` the client alone on someone else's server.
+`soldat-server-windows` and `soldat-server-linux` hold the server and the assets; run it
+from its own folder. Each carries what a machine cannot be counted on to have: the
+Visual C++ runtime on Windows, and ENet in `lib/` on Linux, which asks the system only
+for X11, OpenGL and a glibc as new as Ubuntu 22.04's.
 
 ## Tooling
 

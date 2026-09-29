@@ -41,7 +41,7 @@ x Roll/flip parity with opensoldat
 - Editor for po and poa
 - -----
 - Code refactor
-- GitHub workflows for packaging
+x GitHub workflows for packaging
 - Scripting via lua
 - rcon for servers
 

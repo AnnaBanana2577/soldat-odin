@@ -1,0 +1,99 @@
+# The client and server packages for Windows and Linux, built on every push and kept as
+# the run's artifacts; a version tag (v0.1.0) also puts them on a release of its own.
+# The packaging is build.odin's (odin run build.odin -file -- package), so what is built
+# here is what is built on a desk.
+name: package
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  ODIN_VERSION: dev-2026-09 # a release of github.com/odin-lang/Odin
+
+jobs:
+  package:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-2022
+          # the oldest supported: the packages run on its glibc (2.35) and anything newer
+          - platform: linux
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Odin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ matrix.platform }}" in
+            windows) asset="odin-windows-amd64-$ODIN_VERSION.zip" ;;
+            linux)   asset="odin-linux-amd64-$ODIN_VERSION.tar.gz" ;;
+          esac
+          gh release download "$ODIN_VERSION" --repo odin-lang/Odin --pattern "$asset" --dir "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/odin"
+          case "$asset" in
+            *.zip) unzip -q "$RUNNER_TEMP/$asset" -d "$RUNNER_TEMP/odin" ;;
+            *)     tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP/odin" ;;
+          esac
+          odin="$(find "$RUNNER_TEMP/odin" -maxdepth 3 -type f \( -name odin -o -name odin.exe \) | head -n 1)"
+          dirname "$odin" >> "$GITHUB_PATH"
+
+      - name: Linux libraries
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libenet-dev libx11-dev
+
+      - run: odin version
+
+      - name: Check
+        run: odin run build.odin -file -- check
+
+      - name: Test
+        run: odin run build.odin -file -- test
+
+      - name: Package
+        run: odin run build.odin -file -- package
+
+      - name: The Linux programs find ENet beside them
+        if: matrix.platform == 'linux'
+        run: |
+          for dir in dist/soldat-client-linux dist/soldat-server-linux; do
+            readelf -d "$dir/server" | grep -F 'RUNPATH' | grep -F '$ORIGIN/lib'
+            ldd "$dir/server" | grep -F "$PWD/$dir/lib/libenet"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soldat-${{ matrix.platform }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0 # already archives
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-from-tag

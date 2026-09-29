@@ -31,6 +31,8 @@ client/      main (each subsystem opened, the loop, each closed), settings (ever
 server/      main (init / server_loop / cleanup), settings (every sv_ setting), game
              (the tick), queue (a client's commands and which of them this tick runs),
              connection
+launcher/    what a player runs: a server of their own and the client joined to it, or the
+             client alone on someone else's
 ```
 
 The client, client/main.odin:
