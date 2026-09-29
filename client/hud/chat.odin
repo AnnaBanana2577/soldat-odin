@@ -4,6 +4,7 @@ package hud
 import "core:strings"
 import rl "vendor:raylib"
 import "../game"
+import "../input"
 import "../render"
 import "../../shared/net"
 import "../../shared/sim"
@@ -51,12 +52,12 @@ COLOR_OVER_HEAD :: rl.Color{253, 253, 249, 255}
 
 // This frame's keys for the chat. Returns whether they are the chat's: while a line is
 // typed, nothing else hears the keyboard.
-chat_input :: proc(c: ^Chat, g: ^game.Game) -> (keys_taken: bool) {
+chat_input :: proc(c: ^Chat, g: ^game.Game, keys: [Key]input.Keys) -> (keys_taken: bool) {
 	if !c.typing {
-		all, team := rl.IsKeyPressed(.T), rl.IsKeyPressed(.Y)
+		all, team := input.keys_pressed(keys[.Chat]), input.keys_pressed(keys[.Team_Chat])
 		if !all && !team do return false
 		c.typing, c.team, c.len, c.started, c.reason = true, team, 0, rl.GetTime(), false
-		for rl.GetCharPressed() != 0 {} // the T or Y that opened it
+		for rl.GetCharPressed() != 0 {} // the key that opened it
 		rl.SetExitKey(.KEY_NULL)          // Esc lets go of the line, not of the game
 		return true
 	}

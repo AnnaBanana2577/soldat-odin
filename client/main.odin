@@ -87,6 +87,7 @@ main :: proc() {
 	if !game.init(&app.game, o.base, app.conn.slot, o.interp_least, o.clock_target) do fail("could not load the game's data from %s", o.base)
 	render.init(&app.render, o.base)
 	hud.init(&app.hud, o.base)
+	settings_binds(o, &app.input, &app.hud)
 	audio.init(&app.audio, o.base, o.volume)
 	app.camera.zoom = 1
 	debug_init(&app.debug, o, &app.camera)

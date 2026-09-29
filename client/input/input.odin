@@ -1,6 +1,5 @@
 package input
 
-import rl "vendor:raylib"
 import "../../shared/sim"
 
 // Input is sampled every frame and consumed every tick. Held buttons are whatever
@@ -11,30 +10,16 @@ Input :: struct {
 	held:    sim.Buttons,
 	pressed: sim.Buttons,
 	aim:     sim.Vec2, // the cursor in world space
-}
-
-Bind :: struct {
-	key:    rl.KeyboardKey,
-	button: sim.Button,
-}
-
-// TODO binds from the config; these are the defaults
-BINDS :: [?]Bind{
-	{.A, .Left}, {.D, .Right}, {.W, .Jump}, {.S, .Crouch}, {.X, .Prone},
-	{.SPACE, .Jet}, {.E, .Throw}, {.R, .Reload}, {.Q, .Change}, {.F, .Drop}, {.K, .Suicide},
+	binds:   [sim.Button]Keys, // what presses each button: the bind_ settings (binds.odin)
 }
 
 // The keys and mouse buttons now, and `aim`, the cursor in world space. `scripted` is
-// held the whole run by a debug option, on top of the keys. The mouse is the trigger
-// unless a menu has it (`mouse_free`), and the keys are the soldier's unless a line is
-// being typed (`keys_free`).
+// held the whole run by a debug option, on top of the keys. The mouse is the soldier's
+// unless a menu has it (`mouse_free`), and the keys are unless a line is being typed
+// (`keys_free`).
 sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free, keys_free: bool) {
 	held := scripted
-	if keys_free {
-		for b in BINDS do if rl.IsKeyDown(b.key) do held += {b.button}
-	}
-	if mouse_free && rl.IsMouseButtonDown(.LEFT) do held += {.Fire}
-	if mouse_free && rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
+	for keys, button in in_.binds do if keys_down(keys, keys_free, mouse_free) do held += {button}
 	// a one-shot button counts from the frame it goes down until a tick consumes it
 	in_.pressed += (held - in_.held) & sim.ONE_SHOT
 	in_.held = held

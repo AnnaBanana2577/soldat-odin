@@ -82,7 +82,7 @@ settings_read :: proc(s: ^Settings) {
 		if arg == "-sv_config" && i + 2 < len(os.args) do s.config = os.args[i + 2]
 	}
 	if s.config == "" do s.config = strings.concatenate({s.base, "/config.cfg"})
-	cvar.load(&c, s.config, {"cl_", "net_", "snd_", "r_", "ui_", "dbg_"}) // the client's may share the file
+	cvar.load(&c, s.config, {"cl_", "net_", "snd_", "r_", "ui_", "bind_", "dbg_"}) // the client's may share the file
 	for arg in cvar.parse(&c, os.args[1:]) do fmt.eprintfln("%s is no setting of the server", arg)
 	if s.list_cvars {
 		cvar.list(&c)

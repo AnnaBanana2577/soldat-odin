@@ -16,10 +16,12 @@ import "core:path/filepath"
 import "core:strings"
 import rl "vendor:raylib"
 import "../game"
+import "../input"
 import "../render"
 import "../../shared/sim"
 
 Hud :: struct {
+	keys:   [Key]input.Keys, // what opens and toggles the menus and boards: the bind_ settings
 	art:    [Art]rl.Texture2D,
 	guns:   [sim.Weapon_Id]rl.Texture2D, // the kill feed's and the menu's icons
 	fonts:  [Font]rl.Font,
@@ -34,6 +36,10 @@ Hud :: struct {
 	scores_shown: bool, // F1
 	minimap_shown: bool, // F3; off until it is asked for, as in the original
 }
+
+// What the HUD answers to, each bound by a bind_ setting (client/settings.odin). Escape and
+// the number keys in the menus are fixed.
+Key :: enum { Chat, Team_Chat, Scores, Minimap, Weapons_Menu, Team_Menu, Vote_Yes, Vote_No }
 
 Art :: enum { Health, Health_Bar, Vest_Bar, Ammo, Ammo_Bar, Fire_Bar, Fire_Bar_Back, Jet, Jet_Bar, Nade, Cluster_Nade, Back, Flag, No_Flag, Cursor, Menu_Cursor, Small_Dot }
 
@@ -136,15 +142,15 @@ font_find :: proc(base: string) -> string {
 // while a line is typed; F1 for the scoreboard; the weapons and team menus. Returns
 // what of the keys and the mouse the HUD took this frame, which the game does not hear.
 input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken, keys_taken: bool) {
-	if chat_input(&h.chat, g) do return false, true
+	if chat_input(&h.chat, g, h.keys) do return false, true
 	if vote_input(h, g) do return false, false
 	mouse_taken = menus_input(h, g, cursor)
 	if menus_open(h) do return mouse_taken, false // the soldier still hears its own keys
-	if rl.IsKeyPressed(.F1) do h.scores_shown = !h.scores_shown
-	if rl.IsKeyPressed(.F3) do h.minimap_shown = !h.minimap_shown
-	if rl.IsKeyPressed(.TAB) do h.team.open = false // the weapons menu's key: one menu at a time
+	if input.keys_pressed(h.keys[.Scores]) do h.scores_shown = !h.scores_shown
+	if input.keys_pressed(h.keys[.Minimap]) do h.minimap_shown = !h.minimap_shown
+	if input.keys_pressed(h.keys[.Weapons_Menu]) do h.team.open = false // the weapons menu's key: one menu at a time
 	// the weapons menu first: a team picked opens it, and this frame's keys are the team menu's
-	mouse_taken = menu_input(&h.menu, g, cursor) || mouse_taken
+	mouse_taken = menu_input(&h.menu, g, cursor, h.keys[.Weapons_Menu]) || mouse_taken
 	mouse_taken = team_menu_input(h, g, cursor) || mouse_taken
 	return mouse_taken, false
 }

@@ -4,6 +4,7 @@ package hud
 import "core:fmt"
 import rl "vendor:raylib"
 import "../game"
+import "../input"
 import "../../shared/sim"
 
 // The weapons menu (the original's limbo menu): ten primaries and four secondaries down
@@ -59,8 +60,8 @@ menu_covers :: proc(sc: Screen, cursor: sim.Vec2) -> bool {
 
 // This frame's keys and mouse for the menu. Returns whether the mouse is the menu's
 // this frame, and so not the trigger.
-menu_input :: proc(m: ^Weapons_Menu, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken: bool) {
-	if rl.IsKeyPressed(.TAB) {
+menu_input :: proc(m: ^Weapons_Menu, g: ^game.Game, cursor: sim.Vec2, open_key: input.Keys) -> (mouse_taken: bool) {
+	if input.keys_pressed(open_key) {
 		if m.open do m.open = false
 		else do menu_open(m, by_hand = true)
 	}

@@ -4,6 +4,7 @@ package hud
 import "core:fmt"
 import rl "vendor:raylib"
 import "../game"
+import "../input"
 import "../../shared/sim"
 
 // The team menu, the original's: Alpha and Bravo, with how many play on each. M opens
@@ -36,7 +37,7 @@ team_menu_covers :: proc(sc: Screen, cursor: sim.Vec2) -> bool {
 // This frame's keys and mouse for the team menu. Returns whether the mouse is the menu's.
 team_menu_input :: proc(h: ^Hud, g: ^game.Game, cursor: sim.Vec2) -> (mouse_taken: bool) {
 	t := &h.team
-	if rl.IsKeyPressed(.M) {
+	if input.keys_pressed(h.keys[.Team_Menu]) {
 		t.open = !t.open
 		if t.open do h.menu.open = false
 	}
