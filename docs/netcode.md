@@ -62,7 +62,7 @@ actually built.
   (client/game/view.odin). Every command names the tick it was made at, and the
   difference from the tick the server runs it in is its lag: a bullet it fires keeps
   that lag and meets the soldiers as they were that long ago (sim/history.odin), for as
-  long as it flies, up to a cap (sv_maxrewind, 300 ms by default; past it a shooter
+  long as it flies, up to a cap (sv_maxrewind, 500 ms by default; past it a shooter
   leads). The lag is measured when the command runs, not when its packet lands, so the
   ticks it waited in the queue and a stall's burst are counted too. What a shot needs
   is about the round trip and the view's delay together: 17 ticks on a 140 ms line, 36

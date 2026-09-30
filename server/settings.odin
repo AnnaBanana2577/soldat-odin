@@ -46,7 +46,7 @@ settings_default :: proc() -> Settings {
 		bots_difficulty = 100,
 		bots_chat     = true,
 		vote_percent  = 60,
-		max_rewind    = 300,
+		max_rewind    = 500,
 		update_others = 2,
 	}
 }
