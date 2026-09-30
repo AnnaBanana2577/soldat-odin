@@ -49,7 +49,7 @@ explode :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16, kind: Explosio
 		if kind == .Cluster do modifier *= 0.5
 		else do a.y *= 2
 		if s.cease_fire_counter < 0 {
-			emit(events, Hit{shooter = b.owner, target = u8(i), weapon = b.weapon, amount = (1 / (dist + 1)) * info.damage * modifier, part = 0, pos = pose[part], push = -a})
+			emit(events, Hit{shooter = b.owner, target = u8(i), weapon = b.weapon, amount = (1 / (dist + 1)) * info.damage * modifier, part = 0, pos = pose[part], push = -a, shot = b.shot_id})
 		}
 	}
 

@@ -63,6 +63,7 @@ init :: proc() {
 		os.exit(1)
 	}
 	for _ in 0 ..< s.bots do add_bot(&server.game)
+	if s.shot_log != "" do server.game.shot_log = shot_log_open(s.shot_log)
 	server.last = time.tick_now()
 }
 
@@ -78,6 +79,7 @@ server_loop :: proc() {
 }
 
 cleanup :: proc() {
+	if server.game.shot_log != nil do os.close(server.game.shot_log)
 	timer.fine_sleep_end()
 	host_close(&server.host)
 }

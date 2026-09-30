@@ -59,11 +59,15 @@ actually built.
 - Time. A client shows the others at a view tick a few ticks behind the newest word
   of them, drawn between the two words around it, so nothing about them is guessed and
   nothing taken back; how far behind follows the line, three ticks on a good one
-  (client/game/view.odin). Every Input names that tick, and the
-  difference from the tick it arrives in is the client's lag, measured per packet. A
-  bullet keeps the lag of the packet it came in and meets the soldiers as they were
-  that long ago (sim/history.odin), for as long as it flies, up to a cap (sv_maxrewind,
-  300 ms by default; past it a shooter leads). The others fly that bullet on by the
+  (client/game/view.odin). Every command names the tick it was made at, and the
+  difference from the tick the server runs it in is its lag: a bullet it fires keeps
+  that lag and meets the soldiers as they were that long ago (sim/history.odin), for as
+  long as it flies, up to a cap (sv_maxrewind, 500 ms by default; past it a shooter
+  leads). The lag is measured when the command runs, not when its packet lands, so the
+  ticks it waited in the queue and a stall's burst are counted too. What a shot needs
+  is about the round trip and the view's delay together: 17 ticks on a 140 ms line, 36
+  on a 380 ms one. Every packet also names the tick shown now, and the difference from
+  the tick it arrives in is the lag the client is told back. The others fly that bullet on by the
   ticks since its birth, its shooter's lag and their own: the server will rule it
   against me as I was my own lag ago, so the bullet that will be ruled to hit me is
   that far ahead of the one the server spawned. Soldat's rule: my ping plus the

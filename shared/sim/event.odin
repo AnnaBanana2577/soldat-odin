@@ -44,7 +44,8 @@ Explosion :: struct { id: u16, player: u8, weapon: Weapon_Id, pos: Vec2, radius:
 // A bullet or blast of `shooter` wounded `target`: the damage the sim computed, the
 // skeleton part hit (0 for a blast), the point hit, and the knockback to give. Nothing
 // has changed yet; the server applies it with damage_apply, a client only shows it.
-Hit :: struct { shooter, target: u8, weapon: Weapon_Id, amount: f32, part: u8, pos, push: Vec2 }
+// `shot` is the bullet's shot_id, the same number on every machine.
+Hit :: struct { shooter, target: u8, weapon: Weapon_Id, amount: f32, part: u8, pos, push: Vec2, shot: u32 }
 
 Damage :: struct { attacker, target: u8, weapon: Weapon_Id, amount: f32, vest: bool }
 Kill :: struct { killer, target: u8, weapon: Weapon_Id, pos: Vec2, health: f32, part: u8, kills: i32 } // kills: the killer's tally now

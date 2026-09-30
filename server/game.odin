@@ -1,6 +1,7 @@
 package server
 
 import "core:fmt"
+import "core:os"
 import "core:time"
 import enet "vendor:ENet"
 import "../shared/net"
@@ -22,8 +23,8 @@ import "../shared/sim"
 //   send           the things that changed, what was decided, and every other tick
 //                  the soldiers and the bullets born
 //
-// Time. A client shows the others a little in the past, and says with every packet
-// which server tick that is. The difference from the tick its packet arrives in is its
+// Time. A client shows the others a little in the past, and says with every command
+// which server tick that was. The difference from the tick the command runs in is its
 // lag. A bullet keeps its shooter's lag and meets the soldiers as they were that long
 // ago, all the way (sim/history.odin), so a shot lands where its shooter aimed it. The
 // other clients fly that bullet on by its shooter's lag plus their own (client/game),
@@ -49,6 +50,7 @@ Game :: struct {
 	ends:       [dynamic]Ended,           // and where the clients' own ended, told back to them
 	shot_seq:   [sim.MAX_PLAYERS]u32,     // the last number given to each shooter's bullets
 	things_sent: [sim.MAX_THINGS]sim.Thing, // as the clients last heard them
+	shot_log:   ^os.File, // sv_shotlog: every player's shot and what it hit, or nil
 
 	incoming, outgoing: net.Message, // scratch: an Update is too large for the stack
 	buf: [net.MAX_PACKET]u8,
@@ -77,6 +79,7 @@ Client :: struct {
 	bot:        bool, // played by the server itself (sim/bot.odin): no peer, nothing received or sent
 	queue:      Queue, // what it pressed, and what of that the sim has yet to run
 	lag:        f32,   // how late it sees the world, in ticks, smoothed: told back to it
+	behind:     u32,   // and as its last packet measured it, before the rewind's cap
 	line_ms:    u16,   // the round trip its simulated line adds, as it said on joining
 	// for the leave line: the hits it gave and took as ruled here, which its own summary
 	// has as it saw them; `judged` sums how far back its shots were ruled
@@ -200,16 +203,29 @@ step_soldiers :: proc(g: ^Game) {
 		if !c.connected do continue
 		slot := u8(i)
 		before := g.events.count
+		ran := 0
 		if c.bot {
 			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(&g.bots, &g.ctx, w, slot), &g.events)
 		} else {
-			for cmd in queue_take(&c.queue, buf[:]) do sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
+			cmds := queue_take(&c.queue, buf[:])
+			ran = len(cmds)
+			for cmd in cmds {
+				// judged against what its client showed when it made this command, which
+				// has waited in the queue since: a tick or two, a stall's worth in a burst
+				back := w.tick > cmd.view ? w.tick - cmd.view : 0
+				w.soldiers[slot].view_lag = u8(min(back, g.max_rewind))
+				sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
+			}
 		}
 		// its own client fired these already; everyone else hears of them
 		for k in before ..< g.events.count {
 			#partial switch v in g.events.items[k] {
 			case sim.Bullet_Spawn:
 				tell_born(g, int(v.id), to_shooter = false)
+				if g.shot_log != nil && !c.bot {
+					b := &w.bullets[v.id]
+					fmt.fprintfln(g.shot_log, "fire\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%v\t%d", w.tick, slot, b.shot_id, b.spawn_cmd, b.lag, c.behind, ran, c.queue.depth, b.weapon, g.max_rewind)
+				}
 			case sim.Fire:
 				c.shots += 1
 				c.judged += int(w.soldiers[slot].view_lag)
@@ -241,13 +257,14 @@ receive :: proc(g: ^Game, host: ^Host) {
 
 // A client's commands into its queue, and how late it sees the world: the difference
 // between the tick it says it is showing the others at and the tick its packet lands in.
-// What it fires is judged that far back (sim/history.odin).
+// That is told back to it; what it fires is judged by each command's own tick instead,
+// when the command runs (step_soldiers).
 receive_input :: proc(g: ^Game, slot: u8, m: ^net.Input) {
 	c := &g.clients[slot]
 	tick := g.world.tick
 	behind := tick > m.view_tick ? tick - m.view_tick : 0
 	c.lag += (f32(behind) - c.lag) * LAG_SMOOTHING
-	g.world.soldiers[slot].view_lag = u8(min(behind, g.max_rewind))
+	c.behind = behind
 	queue_push(&c.queue, m.cmds[:m.count])
 }
 
@@ -473,16 +490,27 @@ step_world :: proc(g: ^Game) {
 	w := &g.world
 	sim.ragdolls_update(&g.ctx, w, &g.events)
 	sim.things_update(&g.ctx, w, &g.events)
+	if g.shot_log != nil do shot_log_flights(g)
 	sim.bullets_update(&g.ctx, w, &g.events)
 	sim.round_tick(&g.ctx, w, &g.events)
 	reported := g.events.count
 	for i in 0 ..< reported {
-		if hit, is_hit := g.events.items[i].(sim.Hit); is_hit do sim.damage_apply(&g.ctx, w, hit, &g.events)
+		hit, is_hit := g.events.items[i].(sim.Hit)
+		if !is_hit do continue
+		if g.shot_log != nil && g.clients[hit.shooter].connected && !g.clients[hit.shooter].bot {
+			fmt.fprintfln(g.shot_log, "hit\t%d\t%d\t%d\t%d\t%d\t%.1f\t%v", w.tick, hit.shooter, hit.shot, hit.target, hit.part, hit.amount, w.soldiers[hit.target].dead)
+		}
+		sim.damage_apply(&g.ctx, w, hit, &g.events)
 	}
 	for e in sim.events_slice(&g.events) {
 		if v, gone := e.(sim.Bullet_End); gone && g.clients[v.owner].connected && !g.clients[v.owner].bot {
 			append(&g.ends, Ended{owner = v.owner, end = {shot = v.shot, pos = v.pos, impact = v.impact}, tick = g.world.tick})
+			if g.shot_log != nil {
+				b := &w.bullets[v.id]
+				fmt.fprintfln(g.shot_log, "end\t%d\t%d\t%d\t%d\t%.2f\t%.2f\t%s", w.tick, v.owner, v.shot, b.timeout, v.pos.x, v.pos.y, sim.bullet_end_cause(&g.events, v))
+			}
 		}
+		if v, killed := e.(sim.Kill); killed && g.shot_log != nil do fmt.fprintfln(g.shot_log, "death\t%d\t%d\t%d", w.tick, v.target, v.killer)
 		sim.bot_event(&g.bots, w, e)
 		if v, wounded := e.(sim.Damage); wounded && v.attacker != v.target {
 			g.clients[v.attacker].hits_given += 1
@@ -627,4 +655,60 @@ send_message :: proc(g: ^Game, host: ^Host, to: u8) {
 	reliable := net.RELIABLE[net.message_kind(&g.outgoing)]
 	if to == EVERYONE do host_broadcast(host, g.buf[:size], reliable)
 	else do host_send(host, to, g.buf[:size], reliable)
+}
+
+// ---- the shot log ----
+
+// sv_shotlog: a line for every shot a player's command fired here and every hit one of
+// them made, to be joined by (slot, shot, cmd) with the lines its client wrote of the
+// same shots (client/debug.odin's dbg_shotlog): a shot the client made and the server
+// did not (a swing it predicted) is one the next word numbers again, so the shot alone
+// is not enough. A shot the client saw hit and this file has
+// no hit for is one the player saw blood for and did no damage with; the client's line
+// says which tick it showed the others at when it fired, and so the lag it should have
+// been judged by, against the lag this one was.
+shot_log_open :: proc(path: string) -> ^os.File {
+	f, err := os.create(path)
+	if err != nil {
+		fmt.eprintfln("could not write the shot log %s: %v", path, err)
+		return nil
+	}
+	fmt.fprintln(f, "# fire  tick slot shot cmd lag behind ran depth weapon cap")
+	fmt.fprintln(f, "#   tick: the server tick the command ran in; cmd: its number; lag: the ticks back")
+	fmt.fprintln(f, "#   the shot is judged, from the command's own tick (capped at sv_maxrewind); behind:")
+	fmt.fprintln(f, "#   the client's last packet's measure, uncapped; ran: commands its queue ran this")
+	fmt.fprintln(f, "#   tick (more than one: a burst); depth: commands waiting before the take; cap:")
+	fmt.fprintln(f, "#   sv_maxrewind in ticks")
+	fmt.fprintln(f, "# hit   tick slot shot target part amount dead")
+	fmt.fprintln(f, "#   part 0 is a blast; dead: the target was a corpse already")
+	fmt.fprintln(f, "# fly   tick slot shot timeout x y vx vy")
+	fmt.fprintln(f, "#   a bullet about to be met against the soldiers: its path is x,y to x+vx,y+vy")
+	fmt.fprintln(f, "# near  tick slot shot timeout target x y dir stance body frame legs frame protected part1x part1y .. part7x part7y")
+	fmt.fprintln(f, "#   a soldier within SHOT_LOG_REACH of that path, rewound as the bullet meets it,")
+	fmt.fprintln(f, "#   with the centres of its seven hit parts (radius sim.PART_RADIUS)")
+	fmt.fprintln(f, "# end   tick slot shot timeout x y why")
+	fmt.fprintln(f, "#   a bullet gone, and what ended it: soldier, wall, collider, explosion or other")
+	fmt.fprintln(f, "# death tick target killer")
+	fmt.fprintln(f, "#   anyone's: a shot at a soldier after this is at a corpse, however alive it is shown")
+	return f
+}
+
+SHOT_LOG_REACH :: 60 // a soldier this near a bullet's path is logged with it
+
+// Before the bullets fly: every player's bullet, and the soldiers near its path as it
+// will meet them (sim.bullet_near), for the shot log.
+shot_log_flights :: proc(g: ^Game) {
+	w := &g.world
+	near: [sim.MAX_PLAYERS]sim.Bullet_Near
+	for &b in w.bullets {
+		if !b.active || !g.clients[b.owner].connected || g.clients[b.owner].bot do continue
+		fmt.fprintfln(g.shot_log, "fly\t%d\t%d\t%d\t%d\t%.2f\t%.2f\t%.2f\t%.2f", w.tick, b.owner, b.shot_id, b.timeout, b.pos.x, b.pos.y, b.vel.x, b.vel.y)
+		for n in sim.bullet_near(&g.ctx, w, &b, SHOT_LOG_REACH, near[:]) {
+			s := n.soldier
+			fmt.fprintf(g.shot_log, "near\t%d\t%d\t%d\t%d\t%d\t%.2f\t%.2f\t%d\t%v\t%v\t%d\t%v\t%d\t%v", w.tick, b.owner, b.shot_id, b.timeout, n.target,
+				s.pos.x, s.pos.y, s.direction, s.stance, s.body.id, s.body.frame, s.legs.id, s.legs.frame, s.cease_fire_counter >= 0)
+			for p in n.parts do fmt.fprintf(g.shot_log, "\t%.2f\t%.2f", p.x, p.y)
+			fmt.fprintln(g.shot_log)
+		}
+	}
 }
