@@ -330,6 +330,7 @@ step_mine :: proc(g: ^Game, in_: ^input.Input) {
 	g.my_prev = mine.pos
 	g.seq += 1
 	cmd := input.command(in_, g.seq)
+	cmd.view = g.view.tick // what a shot of it is judged against
 	append(&g.pending, cmd)
 	// a second of them: a client further behind than that has lost its place anyway, and
 	// dropping one the server has not run yet would leave my replay short of it

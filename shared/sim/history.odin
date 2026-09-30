@@ -2,8 +2,8 @@ package sim
 
 // Where everyone was over the last second, kept on the server so a shot is judged
 // against the soldiers as its shooter saw them. A client shows the others some ticks
-// behind the server's present and says which tick with every packet; a bullet it
-// fires carries that lag and meets the soldiers from that many ticks ago, out of this
+// behind the server's present and says which tick with every command; a bullet one
+// fires carries the lag from that tick to the one it runs in and meets the soldiers from that many ticks ago, out of this
 // ring, for as long as it flies. A world without a history (a client's) judges
 // against what it shows, which is the same thing.
 

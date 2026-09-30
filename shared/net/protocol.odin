@@ -36,7 +36,7 @@ package net
 
 import "../sim"
 
-VERSION      :: 13
+VERSION      :: 14
 DEFAULT_PORT :: 23073
 
 CHANNEL_UNRELIABLE :: 0 // state: the newest replaces the last
@@ -122,10 +122,11 @@ Roster :: struct {
 	bots:  u32, // a bit for each slot the server plays itself
 }
 
-// My commands the server has not said it ran, oldest first, and the server tick I am
-// showing the others at: the server judges what I fire against the soldiers of that
-// tick, and measures my lag by it. Every packet carries them all again, so a lost one
-// costs nothing.
+// My commands the server has not said it ran, oldest first, each with the server tick I
+// was showing the others at when I made it: the server judges what that command fires
+// against the soldiers of that tick. The packet's own view_tick is the tick I show now,
+// which the server measures my lag by. Every packet carries them all again, so a lost
+// one costs nothing.
 Input :: struct {
 	view_tick: u32,
 	first:     u32, // the number of the first command; they run one per tick from there
@@ -533,7 +534,14 @@ ser_input :: proc(s: ^Stream, m: ^Input) {
 	ser_count(s, &m.count, MAX_CMDS_PER_INPUT)
 	for i in 0 ..< m.count {
 		ser_cmd(s, &m.cmds[i])
-		if !s.writing do m.cmds[i].seq = m.first + u32(i)
+		// the tick it was made at, as how far before the packet's: a byte, since a command
+		// older than 255 ticks is long past what a shot is judged against anyway
+		back := u8(min(m.view_tick - min(m.cmds[i].view, m.view_tick), 255))
+		ser_u8(s, &back)
+		if !s.writing {
+			m.cmds[i].seq = m.first + u32(i)
+			m.cmds[i].view = m.view_tick - min(u32(back), m.view_tick)
+		}
 	}
 }
 

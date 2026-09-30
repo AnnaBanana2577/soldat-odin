@@ -22,8 +22,8 @@ import "../shared/sim"
 //   send           the things that changed, what was decided, and every other tick
 //                  the soldiers and the bullets born
 //
-// Time. A client shows the others a little in the past, and says with every packet
-// which server tick that is. The difference from the tick its packet arrives in is its
+// Time. A client shows the others a little in the past, and says with every command
+// which server tick that was. The difference from the tick the command runs in is its
 // lag. A bullet keeps its shooter's lag and meets the soldiers as they were that long
 // ago, all the way (sim/history.odin), so a shot lands where its shooter aimed it. The
 // other clients fly that bullet on by its shooter's lag plus their own (client/game),
@@ -203,7 +203,13 @@ step_soldiers :: proc(g: ^Game) {
 		if c.bot {
 			sim.soldier_step(&g.ctx, w, slot, sim.bot_command(&g.bots, &g.ctx, w, slot), &g.events)
 		} else {
-			for cmd in queue_take(&c.queue, buf[:]) do sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
+			for cmd in queue_take(&c.queue, buf[:]) {
+				// judged against what its client showed when it made this command, which
+				// has waited in the queue since: a tick or two, a stall's worth in a burst
+				back := w.tick > cmd.view ? w.tick - cmd.view : 0
+				w.soldiers[slot].view_lag = u8(min(back, g.max_rewind))
+				sim.soldier_step(&g.ctx, w, slot, cmd, &g.events)
+			}
 		}
 		// its own client fired these already; everyone else hears of them
 		for k in before ..< g.events.count {
@@ -241,13 +247,13 @@ receive :: proc(g: ^Game, host: ^Host) {
 
 // A client's commands into its queue, and how late it sees the world: the difference
 // between the tick it says it is showing the others at and the tick its packet lands in.
-// What it fires is judged that far back (sim/history.odin).
+// That is told back to it; what it fires is judged by each command's own tick instead,
+// when the command runs (step_soldiers).
 receive_input :: proc(g: ^Game, slot: u8, m: ^net.Input) {
 	c := &g.clients[slot]
 	tick := g.world.tick
 	behind := tick > m.view_tick ? tick - m.view_tick : 0
 	c.lag += (f32(behind) - c.lag) * LAG_SMOOTHING
-	g.world.soldiers[slot].view_lag = u8(min(behind, g.max_rewind))
 	queue_push(&c.queue, m.cmds[:m.count])
 }
 

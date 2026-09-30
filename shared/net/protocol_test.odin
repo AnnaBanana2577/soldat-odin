@@ -80,14 +80,15 @@ bad_input_refused :: proc(t: ^testing.T) {
 	defer free(sent)
 	defer free(back)
 	in_ := Input{view_tick = 50, first = 7, count = 2}
-	in_.cmds[0] = {seq = 7, buttons = {.Left, .Fire}, aim = {5, 6}}
-	in_.cmds[1] = {seq = 8, buttons = {.Jet}, aim = {7, 8}}
+	in_.cmds[0] = {seq = 7, buttons = {.Left, .Fire}, aim = {5, 6}, view = 49}
+	in_.cmds[1] = {seq = 8, buttons = {.Jet}, aim = {7, 8}, view = 50}
 	sent^ = in_
 	good: [MAX_PACKET]u8
 	size, _ := encode(good[:], sent)
 	testing.expect(t, decode(good[:size], back), "as written, it is taken")
 	got := back.(Input)
 	testing.expect(t, got.count == 2 && got.cmds[1].seq == 8 && got.cmds[0].buttons == {.Left, .Fire})
+	testing.expect(t, got.cmds[0].view == 49 && got.cmds[1].view == 50, "each command's view tick")
 
 	testing.expect(t, !decode(good[:size - 1], back), "short")
 	testing.expect(t, !decode(good[:size + 1], back), "long")

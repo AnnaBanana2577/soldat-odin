@@ -27,7 +27,7 @@ Soldier :: struct {
 	// correction. Its client says which life it speaks of, and the server which one it
 	// means, so word from before a placing is never taken for word from after it.
 	life:     u8,
-	view_lag: u8, // ticks behind the present its client shows the others; its shots inherit it
+	view_lag: u8, // ticks behind the present its client showed the others, for the command it runs; its shots inherit it
 	// How it died, so that any client can start the corpse from this state alone. The
 	// position is here and not taken from `pos` because an update carries a dead
 	// soldier's server half only: its player's half, `pos` among it, stops at the

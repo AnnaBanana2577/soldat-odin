@@ -58,6 +58,8 @@ Command :: struct {
 	seq:     u32,
 	buttons: Buttons,
 	aim:     Vec2, // world-space cursor
+	view:    u32,  // the server tick its client showed the others at when it was made:
+	               // what a shot it fires is judged against (history.odin)
 }
 
 Team :: enum u8 { None, Alpha, Bravo, Charlie, Delta, Spectator }
