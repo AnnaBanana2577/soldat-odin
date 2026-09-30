@@ -75,6 +75,7 @@ Game :: struct {
 	// many of each it ruled, and the two agreeing is the measure of the netcode
 	hits_given, hits_taken: int,
 	incoming:    ^net.Message, // scratch: an Update is too large for the stack
+	before_bullets: proc(g: ^Game), // the debug's shot log: the bullets and what they will meet, before they fly
 }
 
 MAX_FAST_FORWARD :: 40 // ticks another's bullet is flown on at most when it is heard of
@@ -349,6 +350,7 @@ step_mine :: proc(g: ^Game, in_: ^input.Input) {
 step_world :: proc(g: ^Game) {
 	sim.ragdolls_update(&g.ctx, &g.world, &g.events)
 	sim.things_update(&g.ctx, &g.world, &g.events)
+	if g.before_bullets != nil do g.before_bullets(g)
 	sim.bullets_update(&g.ctx, &g.world, &g.events)
 	g.world.tick += 1
 	// A hit here is blood and a sound and nothing else, my own included: the wound is the

@@ -99,6 +99,7 @@ main :: proc() {
 		ticks := ticks_owed(dt)
 		for _ in 0 ..< ticks {
 			game.tick(&app.game, &app.conn, &app.input)
+			debug_tick(&app.debug)
 			render.tick(&app.render, &app.game)
 			hud.tick(&app.hud, &app.game)
 			audio.tick(&app.audio, &app.game, app.camera.pos)
@@ -143,6 +144,7 @@ run_headless :: proc() {
 		ticks := ticks_owed(dt)
 		for _ in 0 ..< ticks {
 			game.tick(&app.game, &app.conn, &app.input)
+			debug_tick(&app.debug)
 			input.clear(&app.input)
 		}
 

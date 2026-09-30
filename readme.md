@@ -214,6 +214,9 @@ what you see while making a thing is what the game will show.
   went over the wire. The server's leave line says how many of those hits it ruled,
   and how far back that client's shots were judged: the two agreeing is the measure
   of the netcode. A simulated bad line (net_ping, net_jitter, net_loss) sits on any client.
+  Shot by shot, the server's sv_shotlog and the client's dbg_shotlog write every shot
+  and every hit, and `odin run build.odin -file -- shots SERVER_LOG CLIENT_LOG` joins
+  them: which hits the client showed and the server did not rule, and why.
   The test command runs the wire format's tests.
 - The menus Escape opens (GameMenus.pas): the escape menu, and from it the map and
   kick windows that call a vote. A vote runs for twenty seconds and passes as soon as

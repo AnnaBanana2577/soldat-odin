@@ -26,6 +26,7 @@ View :: struct {
 	least:   int, // the fewest ticks of word ahead of the shown tick this second
 	window:  int, // ticks into that second
 	prev:    [sim.MAX_PLAYERS]sim.Vec2, // where each was shown a tick ago, for drawing between ticks
+	guessed: [sim.MAX_PLAYERS]bool, // shown where it was guessed on to, the newer word not having come
 }
 
 Sample :: struct {
@@ -76,6 +77,7 @@ view_advance :: proc(v: ^View, ctx: ^sim.Context, w: ^sim.World, me: u8) {
 		if u8(i) == me do continue
 		v.prev[i] = s.pos
 		before, after := view_around(v, i, v.tick)
+		v.guessed[i] = before != nil && after == nil
 		if before == nil && after == nil do continue
 		// A corpse is where its own body has it. The word of a dead soldier is the
 		// server's half alone, so the position in it is nothing; the corpse is run here

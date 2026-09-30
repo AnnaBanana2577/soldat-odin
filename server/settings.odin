@@ -29,6 +29,7 @@ Settings :: struct {
 	kits_collide:  bool, // bullets and blasts knock the kits about (the flags always move)
 	max_rewind:  int, // ms: how far back a shot is judged at most; a slower shooter leads
 	update_others: int, // ticks between words of the soldiers that are not the receiver's
+	shot_log:    string, // a file every player's shot is written to, and what it hit
 	config:      string,
 	list_cvars:  bool,
 }
@@ -66,6 +67,7 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "sv_kits_collide", &s.kits_collide, "bullets and blasts knock the kits about")
 	cvar.add(c, "sv_maxrewind", &s.max_rewind, "ms: how far back a shot is judged at most")
 	cvar.add(c, "sv_update_others", &s.update_others, "ticks between words of the other soldiers")
+	cvar.add(c, "sv_shotlog", &s.shot_log, "a file every player's shot is written to, and what it hit (client/debug.odin's dbg_shotlog is the other half)")
 	cvar.add(c, "sv_votepercent", &s.vote_percent, "percent of the players who can vote that must agree for one to pass")
 	cvar.add(c, "sv_config", &s.config, "the settings file read at startup")
 	cvar.add(c, "cvars", &s.list_cvars, "print every setting and what it is set to, and stop")

@@ -43,6 +43,7 @@ Settings :: struct {
 	screenshot: string, // and write the frame to this file
 	menu:       string, // a menu opened at the start, to capture it
 	vote:       string, // a vote called a second in
+	shot_log:   string, // a file my shots are written to, and what they hit here
 	config:     string,
 	list_cvars: bool,
 	// the map editor instead of the game: no server, no soldier, the maps in cl_base
@@ -115,6 +116,7 @@ settings_declare :: proc(c: ^cvar.Set, s: ^Settings) {
 	cvar.add(c, "dbg_screenshot", &s.screenshot, "and write the frame to this file")
 	cvar.add(c, "dbg_menu", &s.menu, "a menu opened at the start: esc, kick, map, team, weapons or scores")
 	cvar.add(c, "dbg_vote", &s.vote, "a vote called a second in: kick SLOT REASON, or map NAME")
+	cvar.add(c, "dbg_shotlog", &s.shot_log, "a file my shots are written to, and what they hit here (the server's sv_shotlog is the other half)")
 	cvar.add(c, "cl_config", &s.config, "the settings file read at startup")
 	cvar.add(c, "cvars", &s.list_cvars, "print every setting and what it is set to, and stop")
 }

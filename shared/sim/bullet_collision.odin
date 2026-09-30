@@ -289,7 +289,7 @@ soldier_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, index: u16,
 		if !corpse && b.style != .Frag_Grenade && b.style != .Flame && b.style != .Arrow do push = b.vel * info.push
 		modifier := hitbox_modifier(info, part)
 		wound :: proc(events: ^Events, b: ^Bullet, ti: int, amount: f32, part: int, point, push: Vec2) {
-			emit(events, Hit{shooter = b.owner, target = u8(ti), weapon = b.weapon, amount = amount, part = u8(part + 1), pos = point, push = push})
+			emit(events, Hit{shooter = b.owner, target = u8(ti), weapon = b.weapon, amount = amount, part = u8(part + 1), pos = point, push = push, shot = b.shot_id})
 		}
 
 		#partial switch b.style {
@@ -405,4 +405,48 @@ thing_collide_bullet :: proc(ctx: ^Context, w: ^World, b: ^Bullet, nearest: f32,
 		if b.style == .Plain || b.style == .Shotgun do emit(events, Thing_Hit{thing = t.style, pos = point, vel = b.vel, part = u8(part)})
 		return
 	}
+}
+
+// The soldiers a bullet is met against this tick that stand within `reach` of its path,
+// each with the centres of the parts it can hit, as soldier_collide_bullet will see them:
+// what the shot logs set side by side, a client's and the server's (client/debug.odin,
+// server/game.odin). Its own shooter and the corpses are left out.
+Bullet_Near :: struct {
+	target:  u8,
+	soldier: ^Soldier,
+	parts:   [len(HIT_PARTS)]Vec2,
+}
+
+bullet_near :: proc(ctx: ^Context, w: ^World, b: ^Bullet, reach: f32, out: []Bullet_Near) -> []Bullet_Near {
+	soldiers := targets(w, b.lag)
+	start, end := b.pos, b.pos + b.vel
+	n := 0
+	for i in 0 ..< MAX_PLAYERS {
+		if n == len(out) do break
+		s := target_soldier(w, soldiers, b.owner, i)
+		if i == int(b.owner) || !s.active || w.soldiers[i].dead do continue
+		// the distance from the soldier to the path, a segment
+		d := end - start
+		t := vec2_dot(d, d) > 0 ? clamp(vec2_dot(s.pos - start, d) / vec2_dot(d, d), 0, 1) : 0
+		if vec2_length(start + d * t - s.pos) > reach do continue
+		pose := soldier_pose(ctx.anims, s, s.pos)
+		out[n] = {target = u8(i), soldier = s}
+		for p, k in HIT_PARTS do out[n].parts[k] = pose[p] - {2, 0} // as a bullet meets them
+		n += 1
+	}
+	return out[:n]
+}
+
+// Why a bullet ended, from what else this tick's events say of it: for the shot logs.
+// A client's own bullet that ends with none of these was ended on the server's word.
+bullet_end_cause :: proc(events: ^Events, e: Bullet_End) -> string {
+	for other in events_slice(events) {
+		#partial switch v in other {
+		case Hit:          if v.shooter == e.owner && v.shot == e.shot do return "soldier"
+		case Wall_Hit:     if v.id == e.id do return "wall"
+		case Collider_Hit: if v.id == e.id do return "collider"
+		case Explosion:    if v.id == e.id do return "explosion"
+		}
+	}
+	return "other"
 }
