@@ -19,7 +19,9 @@ Input :: struct {
 // (`keys_free`).
 sample :: proc(in_: ^Input, aim: sim.Vec2, scripted: sim.Buttons, mouse_free, keys_free: bool) {
 	held := scripted
+	wheel_poll()
 	for keys, button in in_.binds do if keys_down(keys, keys_free, mouse_free) do held += {button}
+	wheel_end_tick()
 	// a one-shot button counts from the frame it goes down until a tick consumes it
 	in_.pressed += (held - in_.held) & sim.ONE_SHOT
 	in_.held = held
